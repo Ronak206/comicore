@@ -1,23 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Menu, X, Zap } from "lucide-react";
-import type { PageView } from "@/app/page";
 
-interface NavbarProps {
-  onNavigate: (page: PageView) => void;
-}
-
-export function Navbar({ onNavigate }: NavbarProps) {
+export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-[#0A0A0A]/90 backdrop-blur-md border-b border-[#222]">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         {/* Logo */}
-        <button
-          onClick={() => onNavigate("landing")}
-          className="flex items-center gap-2 group"
+        <Link
+          href="/"
+          className="flex items-center gap-2"
         >
           <div className="w-9 h-9 bg-[#E8B931] flex items-center justify-center">
             <Zap className="w-5 h-5 text-[#0A0A0A]" strokeWidth={2.5} />
@@ -25,7 +21,7 @@ export function Navbar({ onNavigate }: NavbarProps) {
           <span className="text-xl font-bold tracking-tight text-[#F5F5F0]">
             comicore
           </span>
-        </button>
+        </Link>
 
         {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-8">
@@ -57,18 +53,18 @@ export function Navbar({ onNavigate }: NavbarProps) {
 
         {/* Auth Buttons */}
         <div className="hidden md:flex items-center gap-3">
-          <button
-            onClick={() => onNavigate("login")}
+          <Link
+            href="/login"
             className="px-5 py-2 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase"
           >
             Log In
-          </button>
-          <button
-            onClick={() => onNavigate("signup")}
+          </Link>
+          <Link
+            href="/signup"
             className="px-5 py-2 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase"
           >
             Sign Up
-          </button>
+          </Link>
         </div>
 
         {/* Mobile Menu Toggle */}
@@ -94,18 +90,20 @@ export function Navbar({ onNavigate }: NavbarProps) {
             </a>
           ))}
           <div className="border-t border-[#222] pt-4 flex flex-col gap-3">
-            <button
-              onClick={() => { onNavigate("login"); setMobileOpen(false); }}
-              className="w-full px-5 py-3 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase"
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className="w-full px-5 py-3 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase text-center"
             >
               Log In
-            </button>
-            <button
-              onClick={() => { onNavigate("signup"); setMobileOpen(false); }}
-              className="w-full px-5 py-3 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase"
+            </Link>
+            <Link
+              href="/signup"
+              onClick={() => setMobileOpen(false)}
+              className="w-full px-5 py-3 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase text-center"
             >
               Sign Up
-            </button>
+            </Link>
           </div>
         </div>
       )}

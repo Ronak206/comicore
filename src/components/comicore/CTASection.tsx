@@ -1,13 +1,9 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import type { PageView } from "@/app/page";
+import Link from "next/link";
 
-interface CTASectionProps {
-  onNavigate: (page: PageView) => void;
-}
-
-export function CTASection({ onNavigate }: CTASectionProps) {
+export function CTASection() {
   return (
     <section className="relative py-32 bg-[#0A0A0A] overflow-hidden">
       {/* Background */}
@@ -41,13 +37,13 @@ export function CTASection({ onNavigate }: CTASectionProps) {
         </p>
 
         {/* CTA */}
-        <button
-          onClick={() => onNavigate("signup")}
+        <Link
+          href="/signup"
           className="group inline-flex items-center gap-3 px-10 py-5 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase text-sm"
         >
           Get Started Free
           <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-        </button>
+        </Link>
 
         {/* Trust */}
         <p className="mt-6 text-xs text-[#555] tracking-wide">

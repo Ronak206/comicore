@@ -1,13 +1,9 @@
 "use client";
 
 import { ArrowRight, Play, Sparkles } from "lucide-react";
-import type { PageView } from "@/app/page";
+import Link from "next/link";
 
-interface HeroSectionProps {
-  onNavigate: (page: PageView) => void;
-}
-
-export function HeroSection({ onNavigate }: HeroSectionProps) {
+export function HeroSection() {
   return (
     <section className="relative min-h-screen flex items-center pt-20 overflow-hidden">
       {/* Background elements */}
@@ -63,13 +59,13 @@ export function HeroSection({ onNavigate }: HeroSectionProps) {
 
           {/* CTAs */}
           <div className="flex flex-wrap items-center gap-4 pt-4">
-            <button
-              onClick={() => onNavigate("signup")}
+            <Link
+              href="/signup"
               className="group flex items-center gap-3 px-8 py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase text-sm"
             >
               Start Creating
               <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-            </button>
+            </Link>
             <button className="flex items-center gap-3 px-8 py-4 border border-[#333] text-[#F5F5F0] tracking-wide uppercase text-sm">
               <Play className="w-4 h-4" />
               Watch Demo

@@ -1,13 +1,8 @@
 "use client";
 
 import { Zap } from "lucide-react";
-import type { PageView } from "@/app/page";
 
-interface FooterProps {
-  onNavigate: (page: PageView) => void;
-}
-
-export function Footer({ onNavigate }: FooterProps) {
+export function Footer() {
   return (
     <footer className="border-t border-[#222] bg-[#0A0A0A]">
       <div className="max-w-7xl mx-auto px-6 py-16">
