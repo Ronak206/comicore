@@ -11,6 +11,7 @@ import {
 
 const projects = [
   {
+    id: "1",
     title: "The Last Cyberpunk",
     pages: "24/32",
     status: "In Progress",
@@ -18,6 +19,7 @@ const projects = [
     gradient: "from-[#1A1A1A] to-[#222]",
   },
   {
+    id: "2",
     title: "Shadow Walker Chronicles",
     pages: "18/24",
     status: "In Progress",
@@ -25,6 +27,7 @@ const projects = [
     gradient: "from-[#1A1A1A] to-[#252015]",
   },
   {
+    id: "3",
     title: "Neon Dreams",
     pages: "8/12",
     status: "Draft",
@@ -32,6 +35,7 @@ const projects = [
     gradient: "from-[#1A1A1A] to-[#1F1A22]",
   },
   {
+    id: "4",
     title: "Dark Horizon",
     pages: "32/32",
     status: "Completed",
@@ -39,6 +43,7 @@ const projects = [
     gradient: "from-[#1A1A1A] to-[#1A1F1A]",
   },
   {
+    id: "5",
     title: "Iron Legacy",
     pages: "16/20",
     status: "In Progress",
@@ -46,6 +51,7 @@ const projects = [
     gradient: "from-[#1A1A1A] to-[#201A1A]",
   },
   {
+    id: "6",
     title: "Void Runners",
     pages: "12/12",
     status: "Completed",
@@ -131,9 +137,10 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((project) => (
-            <div
-              key={project.title}
-              className="bg-[#111] border border-[#222] overflow-hidden"
+            <Link
+              key={project.id}
+              href={`/dashboard/comic/${project.id}`}
+              className="bg-[#111] border border-[#222] overflow-hidden block"
             >
               {/* Thumbnail area */}
               <div className={`h-36 bg-gradient-to-br ${project.gradient} relative`}>
@@ -166,7 +173,7 @@ export default function DashboardPage() {
                   Edited {project.edited}
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
