@@ -8,6 +8,14 @@
   Page-by-page comic creation with memory-aware storytelling, user review workflows, and collaborative world-building.
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-16-black?logo=next.js" />
+  <img src="https://img.shields.io/badge/React-19-black?logo=react" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4-black?logo=tailwindcss" />
+  <img src="https://img.shields.io/badge/TypeScript-5-blue?logo=typescript" />
+  <img src="https://img.shields.io/badge/License-MIT-green" />
+</p>
+
 ---
 
 ## Overview
@@ -55,6 +63,92 @@ User Input (Story Details) --> AI Story Engine --> Generate Page 1 --> User Revi
 
 ---
 
+## What's Built
+
+### UI (feature/ui-review branch)
+
+The frontend is a dark-themed, comic-panel-inspired website built with Next.js 16, React 19, Tailwind CSS 4, and shadcn/ui. Design choices:
+
+- **Single accent color** (gold `#E8B931` on black `#0A0A0A`) - no color variation
+- **Single font family** (Geist Sans) throughout - no font variation
+- **No hover effects on cards** - static, brutalist design
+- **Comic-panel inspired** - dashed dividers, halftone dot patterns, film grain overlay, corner brackets, text-stroke headings
+- **Not AI-generated looking** - raw, handcrafted aesthetic
+
+#### Pages
+
+| Page | Description |
+|------|-------------|
+| **Landing Page** | Hero section, features grid, how-it-works steps, masonry gallery, memory system explainer, CTA, footer |
+| **Sign Up** | Split-panel layout with decorative left panel (feature highlights) and form right panel |
+| **Log In** | Split-panel layout with stats dashboard mockup and form |
+
+#### Landing Page Sections
+
+1. **Navbar** - Fixed dark navbar with logo, navigation links, Log In/Sign Up buttons, mobile hamburger menu
+2. **Hero** - Bold `text-stroke` heading, social proof stats, dual CTAs, animated browser mockup showing comic editor preview with panel grid
+3. **Features** - 9-card grid with `1px` gap borders (Story Engine, Panel Artwork, Smart Layouts, Page Review, Memory System, Character Bible, Dialogue Writer, Style Transfer, Export)
+4. **How It Works** - 4-step process with inline visual mockups (Describe, Generate, Review, Build)
+5. **Gallery** - Masonry layout with dual marquee banners scrolling genre names
+6. **Memory System** - 3 memory layers, compression strategy diagram, performance stats bar
+7. **CTA + Footer** - Final call-to-action and 4-column footer
+
+#### Components Structure
+
+```
+src/components/comicore/
+├── Navbar.tsx            # Fixed navigation bar
+├── HeroSection.tsx       # Hero with browser mockup
+├── FeaturesSection.tsx   # 9-card feature grid
+├── HowItWorksSection.tsx # 4-step process
+├── GallerySection.tsx    # Masonry gallery + marquees
+├── MemorySection.tsx     # Memory system explainer
+├── CTASection.tsx        # Final call-to-action
+├── Footer.tsx            # Site footer
+├── SignUpPage.tsx        # Sign up (dummy/placeholder)
+└── LoginPage.tsx         # Log in (dummy/placeholder)
+```
+
+### API Routes (feature/ui-review branch)
+
+9 REST API routes with full JSDoc documentation (request schema, response schema, error codes):
+
+```
+src/app/api/
+├── story/
+│   ├── create/route.ts     # POST - Create new comic session
+│   └── [id]/route.ts       # GET  - Get story details and progress
+├── generate/
+│   ├── page/route.ts       # POST - Generate next comic page
+│   └── revise/route.ts     # POST - Revise a page with feedback
+├── review/
+│   ├── approve/route.ts    # POST - Approve and lock a page
+│   └── feedback/route.ts   # POST - Submit revision feedback
+├── memory/
+│   └── context/route.ts    # GET  - Get full story memory state
+└── export/
+    ├── pdf/route.ts        # POST - Export comic as PDF
+    └── cbz/route.ts        # POST - Export comic as CBZ
+```
+
+#### API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/story/create` | Create a new comic story session with title, characters, genre, art style, premise |
+| `GET` | `/api/story/[id]` | Get full story details, progress, approved pages, optional memory context |
+| `POST` | `/api/generate/page` | Generate the next comic page (script + panels + artwork) |
+| `POST` | `/api/generate/revise` | Revise a page based on user feedback (full/artwork/dialogue/layout only) |
+| `POST` | `/api/review/approve` | Approve and lock a page, triggers memory system update |
+| `POST` | `/api/review/feedback` | Store user feedback with per-panel ratings |
+| `GET` | `/api/memory/context` | Get the full 3-layer memory state (story, visual, panel) |
+| `POST` | `/api/export/pdf` | Export all approved pages as PDF |
+| `POST` | `/api/export/cbz` | Export as CBZ (Comic Book ZIP) |
+
+> All endpoints return placeholder/dummy data matching the documented schema. Ready to be wired to real AI services.
+
+---
+
 ## Memory System Architecture
 
 The biggest challenge in long-form comic generation is **context consistency**. Comicore solves this with a multi-layered memory system:
@@ -95,69 +189,48 @@ To handle unlimited pages without running out of context:
 
 ```
 comicore/
-├── client/                     # Frontend (Next.js)
+├── src/
 │   ├── app/
-│   │   ├── page.tsx           # Landing page
-│   │   ├── create/
-│   │   │   ├── page.tsx       # Story setup wizard
-│   │   │   └── [sessionId]/
-│   │   │       ├── page.tsx   # Main generation workspace
-│   │   │       └── review/
-│   │   │           └── page.tsx # Page review interface
-│   │   └── gallery/
-│   │       └── page.tsx       # Completed comics gallery
+│   │   ├── layout.tsx            # Root layout with Geist fonts
+│   │   ├── page.tsx              # Main entry (client-side routing)
+│   │   ├── globals.css           # Global styles + custom CSS
+│   │   └── api/
+│   │       ├── story/
+│   │       │   ├── create/route.ts
+│   │       │   └── [id]/route.ts
+│   │       ├── generate/
+│   │       │   ├── page/route.ts
+│   │       │   └── revise/route.ts
+│   │       ├── review/
+│   │       │   ├── approve/route.ts
+│   │       │   └── feedback/route.ts
+│   │       ├── memory/
+│   │       │   └── context/route.ts
+│   │       └── export/
+│   │           ├── pdf/route.ts
+│   │           └── cbz/route.ts
 │   ├── components/
-│   │   ├── panels/            # Comic panel components
-│   │   ├── editor/            # Page editing tools
-│   │   ├── review/            # Review workflow UI
-│   │   └── story/             # Story setup forms
-│   └── lib/
-│       ├── api.ts             # API client
-│       └── store.ts           # State management
-├── server/                     # Backend (Node.js / Python)
-│   ├── api/
-│   │   ├── story.ts           # Story management endpoints
-│   │   ├── generate.ts        # Page generation endpoints
-│   │   ├── review.ts          # Review workflow endpoints
-│   │   └── export.ts          # Export endpoints
-│   ├── services/
-│   │   ├── story-engine/      # Core story logic
-│   │   │   ├── plotter.ts     # Plot generation
-│   │   │   ├── dialoguer.ts   # Dialogue generation
-│   │   │   └── panelizer.ts   # Panel layout generation
-│   │   ├── memory/            # Memory system
-│   │   │   ├── story-memory.ts
-│   │   │   ├── visual-memory.ts
-│   │   │   ├── character-bible.ts
-│   │   │   └── compressor.ts  # Memory compression
-│   │   ├── image-gen/         # Image generation
-│   │   │   ├── panel-renderer.ts
-│   │   │   └── style-consistency.ts
-│   │   └── export/            # Export service
-│   │       ├── pdf-exporter.ts
-│   │       └── cbz-exporter.ts
-│   └── db/
-│       ├── schema.prisma      # Database schema
-│       └── migrations/
-├── shared/                     # Shared types and utils
-│   ├── types/
-│   │   ├── story.ts
-│   │   ├── comic.ts
-│   │   └── memory.ts
-│   └── constants/
-├── docs/                       # Documentation
-│   ├── architecture.md
-│   ├── memory-system.md
-│   └── api-reference.md
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── .env.example
-├── .gitignore
-├── docker-compose.yml
+│   │   ├── comicore/             # Comicore-specific components
+│   │   │   ├── Navbar.tsx
+│   │   │   ├── HeroSection.tsx
+│   │   │   ├── FeaturesSection.tsx
+│   │   │   ├── HowItWorksSection.tsx
+│   │   │   ├── GallerySection.tsx
+│   │   │   ├── MemorySection.tsx
+│   │   │   ├── CTASection.tsx
+│   │   │   ├── Footer.tsx
+│   │   │   ├── SignUpPage.tsx
+│   │   │   └── LoginPage.tsx
+│   │   └── ui/                   # shadcn/ui components
+│   ├── hooks/                    # React hooks
+│   └── lib/                      # Utilities
 ├── package.json
-├── README.md
-└── LICENSE
+├── tsconfig.json
+├── tailwind.config.ts
+├── next.config.ts
+├── postcss.config.mjs
+├── .gitignore
+└── README.md
 ```
 
 ---
@@ -166,16 +239,19 @@ comicore/
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Frontend** | Next.js 15 + React 19 | UI framework |
-| **Styling** | Tailwind CSS + shadcn/ui | Component library |
-| **Backend API** | Next.js API Routes / FastAPI | Server endpoints |
-| **Database** | PostgreSQL + Prisma ORM | Data persistence |
-| **AI - Text** | LLM (GPT-4 / Claude) | Story, dialogue, plot |
-| **AI - Image** | SDXL / DALL-E / Flux | Panel artwork generation |
-| **Memory** | Vector DB (Pinecone / pgvector) | Semantic memory search |
-| **Cache** | Redis | Session and memory caching |
-| **Export** | Puppeteer / Sharp | PDF and image processing |
-| **Auth** | NextAuth.js | User authentication |
+| **Framework** | Next.js 16 (App Router) | Full-stack framework |
+| **UI** | React 19 | Component library |
+| **Styling** | Tailwind CSS 4 | Utility-first CSS |
+| **Components** | shadcn/ui | Pre-built UI components |
+| **Language** | TypeScript 5 | Type safety |
+| **Icons** | Lucide React | Icon library |
+| **Animation** | Framer Motion | Page transitions |
+| **Database** | Prisma ORM | Data persistence (planned) |
+| **Auth** | NextAuth.js | Authentication (planned) |
+| **AI - Text** | LLM (GPT-4 / Claude) | Story, dialogue, plot (planned) |
+| **AI - Image** | SDXL / DALL-E / Flux | Panel artwork (planned) |
+| **Memory** | Vector DB (pgvector) | Semantic memory search (planned) |
+| **Export** | Puppeteer / Sharp | PDF and CBZ generation (planned) |
 
 ---
 
@@ -183,13 +259,13 @@ comicore/
 
 This project uses a **branch-per-feature** workflow for 3 team members:
 
-| Branch | Owner Focus | Description |
-|--------|------------|-------------|
-| `main` | - | Production-ready code, protected |
-| `dev` | - | Integration branch, all features merge here first |
-| `feature/memory-system` | Team Member 1 | Memory architecture, context management, character bible, rolling summaries |
-| `feature/ui-review` | Team Member 2 | Review workflow UI, page editor, approval system, revision controls |
-| `feature/story-engine` | Team Member 3 | Story generation logic, plot engine, dialogue system, panel layout |
+| Branch | Owner Focus | Status |
+|--------|------------|--------|
+| `main` | Production-ready code | Protected |
+| `dev` | Integration branch | Active |
+| `feature/ui-review` | Landing page, sign up, log in, API routes, components | In Progress |
+| `feature/memory-system` | Memory architecture, context management, character bible, rolling summaries | Pending |
+| `feature/story-engine` | Story generation logic, plot engine, dialogue system, panel layout | Pending |
 
 ### Workflow Rules
 
@@ -206,10 +282,7 @@ This project uses a **branch-per-feature** workflow for 3 team members:
 ### Prerequisites
 
 - Node.js 20+
-- PostgreSQL 15+
-- Redis
-- Python 3.11+ (for ML services)
-- API keys for LLM and Image Generation providers
+- npm or Bun
 
 ### Installation
 
@@ -218,66 +291,53 @@ This project uses a **branch-per-feature** workflow for 3 team members:
 git clone https://github.com/Ronak206/comicore.git
 cd comicore
 
+# Switch to the UI branch (has all current code)
+git checkout feature/ui-review
+
 # Install dependencies
 npm install
 
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your API keys
-
-# Set up database
-npx prisma migrate dev
-
 # Start development server
 npm run dev
+
+# Open in browser
+# http://localhost:3000         - Landing page
+# http://localhost:3000/#signup - Sign up
+# http://localhost:3000/#login  - Log in
 ```
 
-### Environment Variables
+### Testing API Endpoints
 
-```env
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/comicore
+```bash
+# Create a story session
+curl -X POST http://localhost:3000/api/story/create \
+  -H "Content-Type: application/json" \
+  -d '{"title":"My Comic","premise":"A hero saves the world from an ancient evil that has awakened after a thousand years of slumber."}'
 
-# Redis
-REDIS_URL=redis://localhost:6379
+# Get story details
+curl http://localhost:3000/api/story/session123?includeMemory=true
 
-# AI Providers
-OPENAI_API_KEY=your_openai_key
-REPLICATE_API_KEY=your_replicate_key  # For image generation
+# Generate a page
+curl -X POST http://localhost:3000/api/generate/page \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":"session_123","pageInstructions":{"mood":"dark","panelCount":4}}'
 
-# Vector DB
-PINECONE_API_KEY=your_pinecone_key
-
-# Auth
-NEXTAUTH_SECRET=your_secret
-NEXTAUTH_URL=http://localhost:3000
+# Get memory context
+curl "http://localhost:3000/api/memory/context?sessionId=session_123"
 ```
-
----
-
-## API Endpoints (Planned)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/story/create` | Create a new comic story session |
-| `GET` | `/api/story/[id]` | Get story details and progress |
-| `POST` | `/api/generate/page` | Generate the next comic page |
-| `POST` | `/api/generate/revise` | Revise a specific page |
-| `POST` | `/api/review/approve` | Approve and lock a page |
-| `POST` | `/api/review/feedback` | Submit revision feedback |
-| `GET` | `/api/memory/context` | Get current story context |
-| `POST` | `/api/export/pdf` | Export comic as PDF |
-| `POST` | `/api/export/cbz` | Export comic as CBZ |
 
 ---
 
 ## Roadmap
 
-### Phase 1 - Foundation
-- [ ] Project scaffolding and setup
-- [ ] Database schema and migrations
-- [ ] Basic story creation form
-- [ ] User authentication
+### Phase 1 - Foundation (Current)
+- [x] Project scaffolding and setup
+- [x] Landing page with all sections
+- [x] Sign up page (placeholder)
+- [x] Log in page (placeholder)
+- [x] API route structure with documentation
+- [ ] Database schema and Prisma setup
+- [ ] User authentication (NextAuth.js)
 
 ### Phase 2 - Core Generation
 - [ ] Story engine (plot + dialogue generation)
