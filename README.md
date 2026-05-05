@@ -216,6 +216,290 @@ To handle unlimited pages without running out of context:
 
 ---
 
+## AI Worker Router (Cloudflare)
+
+The AI routing layer is deployed as a **Cloudflare Worker** that dispatches tasks between **Claude** (writer/planner) and **Gemini** (memory/validator). All AI calls from the Next.js backend proxy through this worker.
+
+### Worker Source
+
+```js
+export default {
+  async fetch(request, env, ctx) {
+    try {
+      const url = new URL(request.url);
+      const path = url.pathname;
+      const API_KEY = "sk-onRjqG1aC1qN1lrpArhdn16QjqTExJW2hX-ZSqkMNgY"; // move to env later
+
+      // ─── Health / model info ───
+      if (path === "/") {
+        return new Response(JSON.stringify({
+          service: "Comicore AI Router",
+          models: {
+            claude: "claude-sonnet-4.5",
+            gemini: "google/gemini-3.1-pro-preview"
+          },
+          endpoints: {
+            "/write":   "Claude — story, dialogue, scripts, image prompts",
+            "/think":   "Claude — deep planning, revision analysis",
+            "/memory":  "Gemini — world-building, consistency checks, long context",
+            "/generate":"Pipeline — Claude writes → Gemini validates → returns both"
+          }
+        }, null, 2), {
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      // ─── Body parser (works for GET & POST) ───
+      let bodyData = {};
+      if (request.method === "POST") {
+        bodyData = await request.json().catch(() => ({}));
+      }
+
+      const systemPrompt = bodyData.system || url.searchParams.get("system") || "You are a helpful AI assistant.";
+      const userInput    = bodyData.user    || url.searchParams.get("user")    || "Hello!";
+      const history      = bodyData.history || [];                              // [{role,content}, …]
+
+      // ─── Route to correct model ───
+      let model;
+      let taskType;
+
+      if (path === "/write") {
+        model    = "claude-sonnet-4.5";
+        taskType = "write";
+      } else if (path === "/think") {
+        model    = "claude-sonnet-4.5-thinking";
+        taskType = "think";
+      } else if (path === "/memory") {
+        model    = "google/gemini-3.1-pro-preview";
+        taskType = "memory";
+      } else if (path === "/generate") {
+        // ─── PIPELINE: Claude writes → Gemini validates ───
+        return handlePipeline(systemPrompt, userInput, history, API_KEY);
+      } else {
+        return new Response(JSON.stringify({
+          error: "Unknown endpoint. Use /write, /think, /memory, or /generate"
+        }), { status: 404, headers: { "Content-Type": "application/json" } });
+      }
+
+      // ─── Single model call ───
+      const messages = [
+        { role: "system", content: systemPrompt },
+        ...history,
+        { role: "user", content: userInput }
+      ];
+
+      const apiResponse = await fetch("https://api.aisubscription.shop/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ model, messages })
+      });
+
+      const data = await apiResponse.json();
+
+      return new Response(JSON.stringify({
+        task:          taskType,
+        forced_model:  model,
+        actual_model:  data.model,
+        response:      data
+      }, null, 2), {
+        headers: { "Content-Type": "application/json" }
+      });
+
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+  }
+};
+
+// ─────────────────────────────────────────────
+// PIPELINE: Claude writes → Gemini validates
+// ─────────────────────────────────────────────
+async function handlePipeline(systemPrompt, userInput, history, API_KEY) {
+  const claudeMessages = [
+    { role: "system", content: systemPrompt },
+    ...history,
+    { role: "user", content: userInput }
+  ];
+
+  // Step 1 — Claude generates content
+  const claudeRes = await fetch("https://api.aisubscription.shop/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4.5",
+      messages: claudeMessages
+    })
+  });
+  const claudeData = await claudeRes.json();
+  const claudeOutput = claudeData.choices?.[0]?.message?.content || "";
+
+  // Step 2 — Gemini validates
+  const geminiMessages = [
+    {
+      role: "system",
+      content: "You are a continuity validator. Review the generated content for: 1) Character consistency 2) Plot holes 3) Visual continuity 4) Timeline accuracy. Reply with APPROVED if clean, or list specific issues."
+    },
+    {
+      role: "user",
+      content: `Context:\n${history.map(m => `${m.role}: ${m.content}`).join("\n")}\n\nGenerated content:\n${claudeOutput}\n\nValidate this content.`
+    }
+  ];
+
+  const geminiRes = await fetch("https://api.aisubscription.shop/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "google/gemini-3.1-pro-preview",
+      messages: geminiMessages
+    })
+  });
+  const geminiData = await geminiRes.json();
+  const geminiOutput = geminiData.choices?.[0]?.message?.content || "";
+
+  return new Response(JSON.stringify({
+    task: "generate",
+    pipeline: "claude_write → gemini_validate",
+    claude: {
+      forced_model: "claude-sonnet-4.5",
+      actual_model: claudeData.model,
+      content: claudeOutput
+    },
+    gemini: {
+      forced_model: "google/gemini-3.1-pro-preview",
+      actual_model: geminiData.model,
+      validation: geminiOutput
+    }
+  }, null, 2), {
+    headers: { "Content-Type": "application/json" }
+  });
+}
+```
+
+### Endpoints
+
+| Endpoint | Model | Purpose |
+|----------|-------|---------|
+| `GET /` | — | Health check + model info |
+| `POST /write` | Claude Sonnet 4.5 | Story, dialogue, scripts, image prompts |
+| `POST /think` | Claude 4.5 Thinking | Deep planning, revision analysis |
+| `POST /memory` | Gemini 3.1 Pro | World-building, consistency, long context |
+| `POST /generate` | **Both** | Claude writes → Gemini validates |
+
+### Request Format
+
+All `POST` endpoints accept the same JSON body:
+
+```json
+{
+  "system": "System prompt defining the AI's role",
+  "user": "The user's input / instruction",
+  "history": [
+    {"role": "assistant", "content": "Previous response..."},
+    {"role": "user", "content": "Previous user input..."}
+  ]
+}
+```
+
+### Response Format
+
+**Single model (`/write`, `/think`, `/memory`):**
+
+```json
+{
+  "task": "write",
+  "forced_model": "claude-sonnet-4.5",
+  "actual_model": "claude-sonnet-4.5-20250514",
+  "response": { /* full API response */ }
+}
+```
+
+**Pipeline (`/generate`):**
+
+```json
+{
+  "task": "generate",
+  "pipeline": "claude_write → gemini_validate",
+  "claude": {
+    "forced_model": "claude-sonnet-4.5",
+    "actual_model": "claude-sonnet-4.5-20250514",
+    "content": "Generated script content..."
+  },
+  "gemini": {
+    "forced_model": "google/gemini-3.1-pro-preview",
+    "actual_model": "gemini-3.1-pro-preview",
+    "validation": "APPROVED — No consistency issues found."
+  }
+}
+```
+
+### Usage Examples
+
+**Write a page script:**
+
+```bash
+curl -X POST https://your-worker.your-subdomain.workers.dev/write \
+  -H "Content-Type: application/json" \
+  -d '{
+    "system": "You are a comic writer. Write detailed panel-by-panel scripts.",
+    "user": "Write page 3 of my comic where the hero confronts the villain in a rainstorm.",
+    "history": [
+      {"role": "assistant", "content": "Page 2 summary: Hero arrived at the warehouse..."}
+    ]
+  }'
+```
+
+**Deep planning with thinking model:**
+
+```bash
+curl -X POST https://your-worker.your-subdomain.workers.dev/think \
+  -H "Content-Type: application/json" \
+  -d '{
+    "system": "You are a comic story architect. Plan story arcs and character development.",
+    "user": "Plan the 3-issue arc for the villain reveal. Include twist timing and emotional beats.",
+    "history": []
+  }'
+```
+
+**Validate consistency with Gemini:**
+
+```bash
+curl -X POST https://your-worker.your-subdomain.workers.dev/memory \
+  -H "Content-Type: application/json" \
+  -d '{
+    "system": "You track all story continuity for a comic.",
+    "user": "Check: On page 1 the hero wore a blue jacket. On page 5 he wears a red hoodie. Is this explained?",
+    "history': [/* all previous pages */]
+  }'
+```
+
+**Full pipeline (write + validate in one call):**
+
+```bash
+curl -X POST https://your-worker.your-subdomain.workers.dev/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "system": "You are a comic script writer.",
+    "user": "Write page 4 — the villain origin flashback",
+    "history": [/* pages 1-3 */]
+  }'
+```
+
+Returns both Claude's generated script **and** Gemini's validation in a single response.
+
+---
+
 ## Project Structure
 
 ```
