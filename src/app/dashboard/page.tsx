@@ -76,7 +76,7 @@ const stats = [
 ];
 
 const quickActions = [
-  { icon: Plus, label: "New Comic", href: "/dashboard" },
+  { icon: Plus, label: "New Comic", href: "/dashboard/create" },
   { icon: Play, label: "Resume Last", href: "/dashboard" },
   { icon: Download, label: "Export All", href: "/dashboard/export" },
   { icon: Brain, label: "Memory Bank", href: "/dashboard/memory" },

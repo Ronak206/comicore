@@ -1,134 +1,263 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
-  Plus,
-  Trash2,
   Sparkles,
   BookOpen,
   Users,
   Globe,
   Palette,
-  MessageSquare,
   LayoutGrid,
   ChevronRight,
-  ChevronDown,
-  GripVertical,
-  X,
-  Zap,
-  Eye,
-  RotateCcw,
   Check,
-  FileText,
-  Layers,
-  Image,
+  X,
+  RotateCcw,
+  MessageSquare,
+  Loader2,
+  Zap,
+  AlertTriangle,
+  ChevronDown,
+  Eye,
+  SkipForward,
+  Send,
 } from "lucide-react";
 
-type WorkspaceTab = "story" | "characters" | "world" | "style" | "pages";
+// ─── Types ───────────────────────────────────────
 
-// Dummy project data
-const projectData: Record<string, {
+type WorkspaceTab = "generate" | "chapters" | "characters" | "world" | "style";
+
+interface ProjectData {
+  id: string;
   title: string;
   genre: string;
+  synopsis: string;
+  tone: string;
   status: string;
-  pages: number;
-  totalPages: number;
-}> = {
-  "1": { title: "The Last Cyberpunk", genre: "Sci-Fi / Noir", status: "In Progress", pages: 24, totalPages: 32 },
-  "2": { title: "Shadow Walker Chronicles", genre: "Dark Fantasy", status: "In Progress", pages: 18, totalPages: 24 },
-  "3": { title: "Neon Dreams", genre: "Sci-Fi / Slice of Life", status: "Draft", pages: 8, totalPages: 12 },
-  "4": { title: "Dark Horizon", genre: "Post-Apocalyptic", status: "Completed", pages: 32, totalPages: 32 },
-  "5": { title: "Iron Legacy", genre: "Military Sci-Fi", status: "In Progress", pages: 16, totalPages: 20 },
-  "6": { title: "Void Runners", genre: "Space Opera", status: "Completed", pages: 12, totalPages: 12 },
-};
+  pageGoal: number;
+  currentPage: number;
+  characters: Array<{
+    id: string;
+    name: string;
+    role: string;
+    description: string;
+    appearance: string;
+    personality: string;
+  }>;
+  world: {
+    setting: string;
+    timePeriod: string;
+    atmosphere: string;
+    technology: string;
+    keyLocations: string;
+    rules: string;
+  };
+  style: {
+    artStyle: string;
+    colorPalette: string;
+    panelDensity: string;
+    speechBubbleStyle: string;
+    narrationStyle: string;
+    detailLevel: string;
+    referenceNotes: string;
+  };
+  roughOverview: string;
+  chapters: Array<{
+    id: string;
+    number: number;
+    title: string;
+    description: string;
+    pageRange: string;
+    pageCount: number;
+  }>;
+  storyBeats: Array<{
+    num: string;
+    title: string;
+    description: string;
+    pageRange: string;
+  }>;
+  pages: Array<{
+    id: string;
+    number: number;
+    title: string;
+    status: string;
+    panels: Array<{
+      panelNumber: number;
+      description: string;
+      dialogue: Array<{
+        character: string;
+        text: string;
+        type: string;
+      }>;
+      cameraAngle: string;
+      mood: string;
+    }>;
+    script: string;
+    userInstructions?: string;
+    feedback?: string;
+    generatedAt: string;
+    approvedAt?: string;
+  }>;
+}
+
+type GenerationState = "idle" | "generating" | "reviewing" | "approved" | "revising" | "complete";
+
+// ─── Component ───────────────────────────────────
 
 export default function ComicWorkspacePage() {
   const params = useParams();
-  const id = params?.id as string || "1";
-  const project = projectData[id] || projectData["1"];
+  const id = params?.id as string;
 
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("story");
-  const [storyForm, setStoryForm] = useState({
-    title: project.title,
-    genre: project.genre,
-    synopsis: "In a neon-soaked megacity of 2087, a rogue hacker with a cybernetic arm uncovers a conspiracy that threatens to rewrite the memories of every citizen. Armed with forbidden tech and a scar from a war she can't remember, she must race against time before the city forgets who it is.",
-    tone: "Dark, gritty, with moments of dark humor",
-    targetAudience: "Young Adult / Adult",
-    pageGoal: project.totalPages.toString(),
-    style: "noir-cyberpunk",
-  });
+  const [project, setProject] = useState<ProjectData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("generate");
 
-  const [characters, setCharacters] = useState([
-    { id: 1, name: "Kai Nakamura", role: "Protagonist", description: "A 28-year-old hacker with a cybernetic right arm and a scar across her left eye. She wears a battered black trench coat over metal-studded armor. Sarcastic exterior, deeply loyal to those she trusts.", appearance: "Silver-white short hair, cybernetic right arm (chrome with gold accents), scar across left eye (vertical), black trench coat, combat boots, red goggles on forehead", personality: "Cynical but caring, brilliant strategist, afraid of losing memories, loves junk food" },
-    { id: 2, name: "Zero", role: "Antagonist", description: "A faceless entity that appears as a tall figure in a white porcelain mask. Never speaks directly. Controls the city's memory network and believes erasing painful memories creates a better world.", appearance: "Tall gaunt silhouette, white porcelain mask (no features), flowing dark coat, hands always gloved, eyes emit dim red glow through mask", personality: "Coldly logical, believes suffering is unnecessary, genuinely thinks they are saving people" },
-    { id: 3, name: "Doc Mira", role: "Supporting", description: "A street-level cybernetics doctor who runs an underground clinic. She's Kai's oldest friend and the only person who knows about Kai's missing memories. Wears oversized welding goggles.", appearance: "Brown skin, short curly hair (dyed blue tips), oversized welding goggles on head, lab coat covered in tool patches, multiple tool belts, heavy boots", personality: "Warm, motherly, fiercely protective, terrible cook, tells terrible jokes" },
-  ]);
-  const [nextCharId, setNextCharId] = useState(4);
+  // Generation state
+  const [genState, setGenState] = useState<GenerationState>("idle");
+  const [currentGenPage, setCurrentGenPage] = useState<any>(null);
+  const [validation, setValidation] = useState<string>("");
+  const [userInstructions, setUserInstructions] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [showInstructions, setShowInstructions] = useState(false);
 
-  const [worldForm, setWorldForm] = useState({
-    setting: "Neo-Tokyo 2087 — a massive megacity divided into Upper Districts (corporate towers, clean, sterile) and Lower Districts (neon-lit streets, crowded, dangerous). A massive wall separates them.",
-    timePeriod: "Late 21st Century (2087)",
-    atmosphere: "Rain-soaked streets, neon reflections on wet pavement, constant surveillance drones, smog layering the sky. Holographic ads everywhere. The rich live above the clouds, the poor below the smog.",
-    technology: "Cybernetic implants (arms, eyes, neural links), memory-editing tech (government controlled), AI companions, hover vehicles, holographic displays, neural networks",
-    keyLocations: "The Memory Tower (government HQ), Kai's Hideout (abandoned subway station), Neon Market (underground tech bazaar), The Wall (divider between districts), Doc Mira's Clinic (lower district)",
-    rules: "Memory tech is government-monitored. Illegal memory editing is punishable by 'full wipe.' The Lower Districts have no official police — ruled by corps. Neural implants have a 10-year lifespan before rejection.",
-  });
+  // Load project from API
+  const loadProject = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/engine/project/${id}`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Project not found");
+      setProject(data.data);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
 
-  const [styleForm, setStyleForm] = useState({
-    artStyle: "noir-cyberpunk",
-    colorPalette: "dominated-dark",
-    panelDensity: "medium",
-    speechBubbleStyle: "standard",
-    narrationStyle: "present",
-    detailLevel: "high",
-    referenceNotes: "Inspired by Blade Runner 2049, Ghost in the Shell (1995), Akira. Heavy shadows, rain effects, neon color pops on dark backgrounds. Characters should feel weathered and real.",
-  });
+  useEffect(() => {
+    loadProject();
+  }, [loadProject]);
 
-  const [pages, setPages] = useState([
-    { id: 1, number: 1, title: "The Awakening", status: "approved", panels: 4 },
-    { id: 2, number: 2, title: "Neon Streets", status: "approved", panels: 5 },
-    { id: 3, number: 3, title: "The Job", status: "approved", panels: 4 },
-    { id: 4, number: 4, title: "Flashback — The War", status: "approved", panels: 6 },
-    { id: 5, number: 5, title: "Doc's Clinic", status: "approved", panels: 3 },
-    { id: 6, number: 6, title: "First Contact", status: "approved", panels: 5 },
-    { id: 7, number: 7, title: "The Memory Tower", status: "approved", panels: 4 },
-    { id: 8, number: 8, title: "Chase Sequence", status: "approved", panels: 6 },
-    { id: 9, number: 9, title: "Revelation", status: "in-review", panels: 4 },
-    { id: 10, number: 10, title: "The Betrayal", status: "generating", panels: 5 },
-  ]);
+  // ─── Generate Page ─────────────────────────────
+  const handleGeneratePage = async () => {
+    if (!project) return;
 
-  const [selectedPage, setSelectedPage] = useState<number | null>(9);
+    setGenState("generating");
+    setError(null);
+    setShowInstructions(false);
 
-  const addCharacter = () => {
-    setCharacters([...characters, {
-      id: nextCharId,
-      name: "",
-      role: "Supporting",
-      description: "",
-      appearance: "",
-      personality: "",
-    }]);
-    setNextCharId(nextCharId + 1);
+    try {
+      const res = await fetch("/api/engine/generate-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: id,
+          userInstructions: userInstructions.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setCurrentGenPage(data.data.page);
+      setValidation(data.data.validation);
+      setGenState("reviewing");
+      setUserInstructions("");
+      setFeedback("");
+    } catch (err: any) {
+      setError(err.message || "Generation failed");
+      setGenState("idle");
+    }
   };
 
-  const removeCharacter = (charId: number) => {
-    setCharacters(characters.filter((c) => c.id !== charId));
+  // ─── Approve Page ──────────────────────────────
+  const handleApprovePage = async () => {
+    if (!currentGenPage) return;
+
+    setGenState("approved");
+    try {
+      const res = await fetch("/api/engine/review-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: id,
+          pageId: currentGenPage.id,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      if (data.data.storyComplete) {
+        setGenState("complete");
+      } else {
+        // Ask for next page instructions
+        setShowInstructions(true);
+        setGenState("idle");
+        setCurrentGenPage(null);
+      }
+    } catch (err: any) {
+      setError(err.message);
+      setGenState("reviewing");
+    }
   };
 
-  const updateCharacter = (charId: number, field: string, value: string) => {
-    setCharacters(characters.map((c) => c.id === charId ? { ...c, [field]: value } : c));
+  // ─── Revise Page ───────────────────────────────
+  const handleRevisePage = async () => {
+    if (!currentGenPage || !feedback.trim()) return;
+
+    setGenState("revising");
+    try {
+      const res = await fetch("/api/engine/revise-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: id,
+          pageId: currentGenPage.id,
+          feedback: feedback.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setCurrentGenPage(data.data.page);
+      setValidation(data.data.validation);
+      setGenState("reviewing");
+      setFeedback("");
+    } catch (err: any) {
+      setError(err.message);
+      setGenState("reviewing");
+    }
+  };
+
+  // ─── Skip (approve without review) ─────────────
+  const handleSkipPage = async () => {
+    if (!currentGenPage) return;
+    await handleApprovePage();
   };
 
   const tabs: { key: WorkspaceTab; label: string; icon: typeof BookOpen }[] = [
-    { key: "story", label: "Story", icon: BookOpen },
+    { key: "generate", label: "Generate", icon: Sparkles },
+    { key: "chapters", label: "Chapters", icon: LayoutGrid },
     { key: "characters", label: "Characters", icon: Users },
     { key: "world", label: "World", icon: Globe },
     { key: "style", label: "Art Style", icon: Palette },
-    { key: "pages", label: "Pages", icon: LayoutGrid },
   ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+      </div>
+    );
+  }
+
+  const approvedCount = project?.pages?.filter((p) => p.status === "approved").length || 0;
+  const totalPages = project?.pageGoal || 24;
+  const isComplete = approvedCount >= totalPages;
 
   return (
     <div className="space-y-6">
@@ -139,39 +268,35 @@ export default function ComicWorkspacePage() {
           Dashboard
         </Link>
         <ChevronRight className="w-3 h-3" />
-        <span className="text-[#F5F5F0] uppercase">{project.title}</span>
+        <span className="text-[#F5F5F0] uppercase">{project?.title || "Comic Workspace"}</span>
       </div>
 
-      {/* Project header */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-[#F5F5F0] tracking-tight">
-            {storyForm.title}
+            {project?.title || "Loading..."}
           </h2>
           <div className="flex items-center gap-3 mt-1">
-            <span className="text-xs text-[#E8B931] tracking-widest uppercase">{storyForm.genre}</span>
+            <span className="text-xs text-[#E8B931] tracking-widest uppercase">{project?.genre || "—"}</span>
             <span className="text-[10px] text-[#555]">|</span>
-            <span className="text-xs text-[#666]">Page {project.pages} of {project.totalPages}</span>
-            <span className={`text-[10px] tracking-widest uppercase border px-1.5 py-0.5 ${
-              project.status === "Completed" ? "border-[#E8B931]/40 text-[#E8B931]" :
-              project.status === "In Progress" ? "border-[#999]/40 text-[#999]" :
-              "border-[#555]/40 text-[#555]"
-            }`}>
-              {project.status}
-            </span>
+            <span className="text-xs text-[#666]">Page {approvedCount} of {totalPages}</span>
+            <div className="w-24 h-1.5 bg-[#222]">
+              <div className="h-full bg-[#E8B931]" style={{ width: `${(approvedCount / totalPages) * 100}%` }} />
+            </div>
+            <span className="text-xs text-[#E8B931] font-bold">{Math.round((approvedCount / totalPages) * 100)}%</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="px-4 py-2.5 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2">
-            <Sparkles className="w-3.5 h-3.5" />
-            Generate Next Page
-          </button>
-          <button className="px-4 py-2.5 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase flex items-center gap-2">
-            <Eye className="w-3.5 h-3.5" />
-            Preview
-          </button>
-        </div>
       </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-950/30 border border-red-900/40 p-4 text-sm text-red-400 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {error}
+          <button onClick={() => setError(null)} className="ml-auto text-red-500"><X className="w-4 h-4" /></button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-[#222] overflow-x-auto">
@@ -179,639 +304,467 @@ export default function ComicWorkspacePage() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-2 px-4 py-3 text-xs tracking-widest uppercase whitespace-nowrap transition-colors ${
-              activeTab === tab.key
-                ? "text-[#E8B931] border-b-2 border-[#E8B931]"
-                : "text-[#666]"
+            className={`flex items-center gap-2 px-4 py-3 text-xs tracking-widest uppercase whitespace-nowrap ${
+              activeTab === tab.key ? "text-[#E8B931] border-b-2 border-[#E8B931]" : "text-[#666]"
             }`}
           >
             <tab.icon className="w-3.5 h-3.5" />
             {tab.label}
-            {tab.key === "characters" && (
-              <span className="bg-[#E8B931]/10 text-[#E8B931] px-1.5 py-0.5 text-[10px]">{characters.length}</span>
-            )}
-            {tab.key === "pages" && (
-              <span className="bg-[#E8B931]/10 text-[#E8B931] px-1.5 py-0.5 text-[10px]">{pages.length}</span>
-            )}
           </button>
         ))}
       </div>
 
-      {/* ========== STORY TAB ========== */}
-      {activeTab === "story" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-5">
-            <div className="bg-[#111] border border-[#222] p-6 space-y-5">
-              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-                Story Details
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Comic Title</label>
-                  <input
-                    type="text"
-                    value={storyForm.title}
-                    onChange={(e) => setStoryForm({ ...storyForm, title: e.target.value })}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Genre</label>
-                  <input
-                    type="text"
-                    value={storyForm.genre}
-                    onChange={(e) => setStoryForm({ ...storyForm, genre: e.target.value })}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Synopsis</label>
-                <textarea
-                  value={storyForm.synopsis}
-                  onChange={(e) => setStoryForm({ ...storyForm, synopsis: e.target.value })}
-                  rows={6}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none leading-relaxed"
-                  placeholder="Describe the overall story, main conflict, and what the reader should feel..."
-                />
-                <div className="text-[10px] text-[#555]">{storyForm.synopsis.length} characters</div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Tone / Mood</label>
-                  <input
-                    type="text"
-                    value={storyForm.tone}
-                    onChange={(e) => setStoryForm({ ...storyForm, tone: e.target.value })}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none"
-                    placeholder="Dark, humorous, suspenseful..."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Target Audience</label>
-                  <select
-                    value={storyForm.targetAudience}
-                    onChange={(e) => setStoryForm({ ...storyForm, targetAudience: e.target.value })}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none appearance-none"
-                  >
-                    <option value="All Ages">All Ages</option>
-                    <option value="Young Adult">Young Adult (13+)</option>
-                    <option value="Young Adult / Adult">Young Adult / Adult (16+)</option>
-                    <option value="Adult">Adult (18+)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Page Goal</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    value={storyForm.pageGoal}
-                    onChange={(e) => setStoryForm({ ...storyForm, pageGoal: e.target.value })}
-                    className="w-24 px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none"
-                    min={1}
-                    max={500}
-                  />
-                  <span className="text-xs text-[#555]">pages total</span>
-                  <div className="flex-1 h-1.5 bg-[#222]">
-                    <div
-                      className="h-full bg-[#E8B931]"
-                      style={{ width: `${(project.pages / parseInt(storyForm.pageGoal || "1")) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-[#E8B931] font-bold">{project.pages}/{storyForm.pageGoal}</span>
-                </div>
+      {/* ========== GENERATE TAB (Main Loop) ========== */}
+      {activeTab === "generate" && (
+        <div className="space-y-6">
+          {/* Story complete banner */}
+          {genState === "complete" && (
+            <div className="bg-[#E8B931]/10 border border-[#E8B931]/30 p-8 text-center">
+              <Zap className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+              <h3 className="text-xl font-black text-[#F5F5F0] mb-2">Story Complete!</h3>
+              <p className="text-sm text-[#999] mb-4">All {totalPages} pages have been generated and approved.</p>
+              <div className="flex items-center justify-center gap-3">
+                <Link
+                  href="/dashboard"
+                  className="px-6 py-3 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase"
+                >
+                  Back to Dashboard
+                </Link>
+                <Link
+                  href="/dashboard/export"
+                  className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs"
+                >
+                  Export Comic
+                </Link>
               </div>
             </div>
+          )}
 
-            {/* Scene breakdown */}
-            <div className="bg-[#111] border border-[#222] p-6">
-              <div className="flex items-center justify-between mb-4">
+          {/* Instructions input (shown after approve, before next gen) */}
+          {genState === "idle" && showInstructions && (
+            <div className="bg-[#111] border border-[#E8B931]/30 p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <MessageSquare className="w-4 h-4 text-[#E8B931]" />
                 <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-                  Story Beats / Key Scenes
+                  Any specific instructions for the next page?
                 </h3>
-                <button className="text-[10px] text-[#666] tracking-wide uppercase flex items-center gap-1">
-                  <Plus className="w-3 h-3" /> Add Beat
+              </div>
+              <p className="text-xs text-[#555] mb-3">
+                Optional — leave empty to let AI decide based on the story flow.
+              </p>
+              <textarea
+                value={userInstructions}
+                onChange={(e) => setUserInstructions(e.target.value)}
+                rows={3}
+                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
+                placeholder='E.g., "Make this page action-heavy", "Focus on dialogue between Kai and Doc Mira", "Add a cliffhanger ending"...'
+              />
+              <div className="flex items-center justify-end gap-3 mt-3">
+                <button
+                  onClick={() => {
+                    setUserInstructions("");
+                    setShowInstructions(false);
+                  }}
+                  className="px-4 py-2.5 text-xs text-[#666] tracking-wide uppercase"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={handleGeneratePage}
+                  className="px-6 py-2.5 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Generate Page {approvedCount + 1}
                 </button>
               </div>
-              <div className="space-y-3">
-                {[
-                  { num: "01", title: "Inciting Incident", desc: "Kai discovers her memories have been tampered with during a routine hack job", page: "1-3" },
-                  { num: "02", title: "Rising Action", desc: "She investigates and finds traces of Zero's network in the city's underground", page: "4-10" },
-                  { num: "03", title: "Midpoint Reveal", desc: "Kai learns the Memory Tower is planning a city-wide memory wipe scheduled in 48 hours", page: "11-16" },
-                  { num: "04", title: "Dark Moment", desc: "Doc Mira is captured. Kai's own cybernetic arm begins malfunctioning", page: "17-22" },
-                  { num: "05", title: "Climax", desc: "Kai infiltrates the Memory Tower and confronts Zero face to face", page: "23-28" },
-                  { num: "06", title: "Resolution", desc: "The wipe is stopped but at a cost — Kai's own memories are partially restored", page: "29-32" },
-                ].map((beat) => (
-                  <div key={beat.num} className="flex items-start gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
-                    <div className="w-7 h-7 bg-[#E8B931] text-[#0A0A0A] text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-                      {beat.num}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#F5F5F0]">{beat.title}</span>
-                        <span className="text-[10px] text-[#555]">Pages {beat.page}</span>
+            </div>
+          )}
+
+          {/* Initial generate button */}
+          {genState === "idle" && !showInstructions && (
+            <div className="bg-[#111] border border-[#222] p-12 text-center">
+              <Sparkles className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+              <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Ready to Generate</h3>
+              <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
+                Page {approvedCount + 1} of {totalPages}. The AI will write a detailed page script with panels and dialogue.
+              </p>
+              <p className="text-xs text-[#555] mb-6">
+                You can review each page, give feedback, and approve before moving to the next.
+              </p>
+              <div className="max-w-md mx-auto">
+                <textarea
+                  value={userInstructions}
+                  onChange={(e) => setUserInstructions(e.target.value)}
+                  rows={2}
+                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none mb-3"
+                  placeholder="Optional: any specific instructions for this page..."
+                />
+                <button
+                  onClick={handleGeneratePage}
+                  disabled={genState === "generating"}
+                  className="w-full px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
+                >
+                  {genState === "generating" ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Generating Page {approvedCount + 1}...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Generating spinner */}
+          {genState === "generating" && (
+            <div className="bg-[#111] border border-[#222] p-12 text-center">
+              <Loader2 className="w-12 h-12 text-[#E8B931] animate-spin mx-auto mb-4" />
+              <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Generating Page {approvedCount + 1}</h3>
+              <p className="text-sm text-[#666]">
+                Claude is writing the page script... then Gemini will validate consistency.
+              </p>
+            </div>
+          )}
+
+          {/* Revising spinner */}
+          {genState === "revising" && (
+            <div className="bg-[#111] border border-[#222] p-12 text-center">
+              <RotateCcw className="w-12 h-12 text-[#E8B931] animate-spin mx-auto mb-4" />
+              <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Revising Page {approvedCount + 1}</h3>
+              <p className="text-sm text-[#666]">
+                Claude is rewriting the page based on your feedback...
+              </p>
+            </div>
+          )}
+
+          {/* Page Review */}
+          {(genState === "reviewing" || genState === "approved") && currentGenPage && (
+            <div className="space-y-5">
+              {/* Page header */}
+              <div className="bg-[#111] border border-[#222] p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center">
+                        {currentGenPage.number}
                       </div>
-                      <p className="text-[11px] text-[#666] mt-1 leading-relaxed">{beat.desc}</p>
+                      <div>
+                        <h3 className="text-lg font-black text-[#F5F5F0]">{currentGenPage.title}</h3>
+                        <p className="text-xs text-[#555]">
+                          {currentGenPage.panels?.length || 0} panels — {currentGenPage.panels?.[0]?.mood || project?.tone}
+                        </p>
+                      </div>
                     </div>
+                  </div>
+                  <span className={`text-[10px] tracking-widest uppercase border px-2 py-0.5 ${
+                    genState === "approved" ? "border-[#E8B931]/40 text-[#E8B931]" : "border-[#999]/40 text-[#999]"
+                  }`}>
+                    {genState === "approved" ? "Approved" : "In Review"}
+                  </span>
+                </div>
+
+                {/* Page script summary */}
+                <div className="mt-4 p-4 bg-[#0A0A0A] border border-[#222]">
+                  <p className="text-xs text-[#E8B931] tracking-[0.15em] uppercase mb-2">Page Script</p>
+                  <p className="text-sm text-[#ccc] leading-relaxed">{currentGenPage.script}</p>
+                </div>
+              </div>
+
+              {/* Panels */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {currentGenPage.panels?.map((panel: any) => (
+                  <div key={panel.panelNumber} className="bg-[#111] border border-[#222] p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase">
+                        Panel {panel.panelNumber}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] text-[#555] uppercase tracking-wider">{panel.cameraAngle}</span>
+                        <span className="text-[9px] text-[#555] uppercase tracking-wider">{panel.mood}</span>
+                      </div>
+                    </div>
+
+                    {/* Panel placeholder */}
+                    <div className="w-full h-40 bg-[#0A0A0A] border border-[#222] mb-3 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="w-12 h-12 mx-auto mb-2 border border-[#333] flex items-center justify-center">
+                          <Eye className="w-6 h-6 text-[#333]" />
+                        </div>
+                        <p className="text-[10px] text-[#444] uppercase tracking-wider">Panel Art</p>
+                      </div>
+                    </div>
+
+                    {/* Panel description */}
+                    <p className="text-xs text-[#999] leading-relaxed mb-3">{panel.description}</p>
+
+                    {/* Dialogue */}
+                    {panel.dialogue?.length > 0 && (
+                      <div className="space-y-2">
+                        {panel.dialogue.map((d: any, di: number) => (
+                          <div key={di} className={`p-2 border ${
+                            d.type === "thought" ? "border-[#333] bg-[#0A0A0A] border-dashed" :
+                            d.type === "narration" ? "border-[#444] bg-[#0A0A0A]" :
+                            "border-[#333] bg-[#0A0A0A]"
+                          }`}>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                              d.type === "thought" ? "text-[#999]" :
+                              d.type === "narration" ? "text-[#777]" :
+                              "text-[#E8B931]"
+                            }`}>
+                              {d.type === "narration" ? "NARRATOR" : d.character}
+                            </span>
+                            <p className="text-xs text-[#ccc] mt-0.5 italic">&quot;{d.text}&quot;</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
 
-          {/* Story sidebar */}
-          <div className="space-y-5">
-            <div className="bg-[#111] border border-[#222] p-5">
+              {/* Validation result */}
+              {validation && (
+                <div className={`p-4 border ${
+                  validation.toUpperCase().includes("APPROVED")
+                    ? "border-green-900/40 bg-green-950/20"
+                    : "border-yellow-900/40 bg-yellow-950/20"
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className={`w-4 h-4 ${
+                      validation.toUpperCase().includes("APPROVED") ? "text-green-500" : "text-yellow-500"
+                    }`} />
+                    <span className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase">Gemini Validation</span>
+                  </div>
+                  <p className="text-xs text-[#999] leading-relaxed">{validation}</p>
+                </div>
+              )}
+
+              {/* Feedback / Actions */}
+              {genState === "reviewing" && (
+                <div className="bg-[#111] border border-[#222] p-6">
+                  <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-3">
+                    Review &amp; Decide
+                  </h3>
+                  <p className="text-xs text-[#555] mb-3">
+                    Approve this page to move to the next one, or provide feedback to revise it.
+                  </p>
+                  <textarea
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none mb-3"
+                    placeholder="What would you like changed? Be specific — e.g., 'Make the dialogue more dramatic', 'Change the camera angle in panel 2', 'Add more action'..."
+                  />
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleApprovePage}
+                      className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2"
+                    >
+                      <Check className="w-4 h-4" /> Approve &amp; Continue
+                    </button>
+                    <button
+                      onClick={handleRevisePage}
+                      disabled={!feedback.trim()}
+                      className={`px-6 py-3 text-xs tracking-[0.1em] uppercase flex items-center gap-2 ${
+                        feedback.trim()
+                          ? "border border-[#333] text-[#F5F5F0]"
+                          : "border border-[#222] text-[#444] cursor-not-allowed"
+                      }`}
+                    >
+                      <RotateCcw className="w-4 h-4" /> Revise with Feedback
+                    </button>
+                    <button
+                      onClick={handleSkipPage}
+                      className="px-4 py-3 text-xs text-[#555] tracking-wide uppercase flex items-center gap-1 ml-auto"
+                    >
+                      <SkipForward className="w-3.5 h-3.5" /> Skip
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Progress tracker */}
+          {project?.pages && project.pages.length > 0 && (
+            <div className="bg-[#111] border border-[#222] p-6">
               <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
-                Story Summary
+                Page Progress
               </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center py-2 border-b border-[#222]">
-                  <span className="text-xs text-[#666]">Characters</span>
-                  <span className="text-sm font-bold text-[#F5F5F0]">{characters.length}</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-[#222]">
-                  <span className="text-xs text-[#666]">Story Beats</span>
-                  <span className="text-sm font-bold text-[#F5F5F0]">6</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-[#222]">
-                  <span className="text-xs text-[#666]">Pages Done</span>
-                  <span className="text-sm font-bold text-[#F5F5F0]">{project.pages}/{project.totalPages}</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-[#222]">
-                  <span className="text-xs text-[#666]">Memory Health</span>
-                  <span className="text-sm font-bold text-[#E8B931]">94%</span>
-                </div>
-                <div className="flex justify-between items-center py-2">
-                  <span className="text-xs text-[#666]">Status</span>
-                  <span className="text-[10px] tracking-widest uppercase border border-[#999]/40 text-[#999] px-2 py-0.5">
-                    {project.status}
-                  </span>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: totalPages }, (_, i) => {
+                  const page = project.pages[i];
+                  const isApproved = page?.status === "approved";
+                  const isCurrent = page?.status === "in-review";
+                  return (
+                    <div
+                      key={i}
+                      className={`w-8 h-8 flex items-center justify-center text-[10px] font-bold border ${
+                        isApproved
+                          ? "border-[#E8B931]/40 text-[#E8B931] bg-[#E8B931]/10"
+                          : isCurrent
+                          ? "border-[#999]/40 text-[#999] bg-[#999]/10"
+                          : "border-[#222] text-[#333]"
+                      }`}
+                    >
+                      {i + 1}
+                    </div>
+                  );
+                })}
               </div>
             </div>
+          )}
+        </div>
+      )}
 
-            <div className="bg-[#111] border border-[#222] p-5">
-              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
-                Generation Prompt
-              </h3>
-              <p className="text-[10px] text-[#555] mb-3">This prompt will be used for the next page generation.</p>
-              <div className="bg-[#0A0A0A] border border-[#222] p-3">
-                <p className="text-xs text-[#999] leading-relaxed">
-                  Continue &quot;{storyForm.title}&quot; — After the confrontation with Zero, Kai escapes into the Lower Districts with a damaged cybernetic arm. She finds Doc Mira&apos;s clinic locked down. Mood: tense, urgent. Style: noir-cyberpunk with heavy rain.
-                </p>
-              </div>
-              <textarea
-                className="w-full mt-3 px-3 py-2 bg-[#0A0A0A] border border-[#222] text-xs text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                rows={4}
-                placeholder="Edit the generation prompt or add specific instructions..."
-              />
+      {/* ========== CHAPTERS TAB ========== */}
+      {activeTab === "chapters" && project && (
+        <div className="space-y-4">
+          {project.chapters.length > 0 ? (
+            <>
+              {project.chapters.map((ch) => (
+                <div key={ch.id} className="bg-[#111] border border-[#222] p-5">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-xs font-bold flex items-center justify-center flex-shrink-0">
+                      {ch.number}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold text-[#F5F5F0]">{ch.title}</span>
+                        <span className="text-[10px] text-[#555] border border-[#333] px-2 py-0.5">
+                          Pages {ch.pageRange}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#666] mt-1">{ch.description}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {project.storyBeats && project.storyBeats.length > 0 && (
+                <div className="bg-[#111] border border-[#222] p-6 mt-6">
+                  <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">Story Beats</h3>
+                  <div className="space-y-2">
+                    {project.storyBeats.map((beat) => (
+                      <div key={beat.num} className="flex items-start gap-3">
+                        <div className="w-6 h-6 bg-[#222] text-[#E8B931] text-[9px] font-bold flex items-center justify-center flex-shrink-0">{beat.num}</div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-[#F5F5F0]">{beat.title}</span>
+                            <span className="text-[10px] text-[#555]">{beat.pageRange}</span>
+                          </div>
+                          <p className="text-[11px] text-[#666]">{beat.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="bg-[#111] border border-[#222] p-8 text-center">
+              <p className="text-sm text-[#555]">No chapters generated yet. Complete the creation wizard first.</p>
             </div>
-
-            <div className="bg-[#111] border border-[#222] p-5">
-              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
-                Dialogue Input
-              </h3>
-              <p className="text-[10px] text-[#555] mb-3">Add specific dialogue for the next page.</p>
-              <textarea
-                className="w-full px-3 py-2 bg-[#0A0A0A] border border-[#222] text-xs text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                rows={4}
-                placeholder={`KAI: "We need to move. Now."\nDOC MIRA: "Your arm is sparking again."\nKAI: "I know. I know."`}
-              />
-            </div>
-          </div>
+          )}
         </div>
       )}
 
       {/* ========== CHARACTERS TAB ========== */}
-      {activeTab === "characters" && (
-        <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-              Characters ({characters.length})
-            </h3>
-            <button
-              onClick={addCharacter}
-              className="px-4 py-2.5 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Character
-            </button>
-          </div>
-
-          {characters.map((char) => (
+      {activeTab === "characters" && project && (
+        <div className="space-y-4">
+          {project.characters.length > 0 ? project.characters.map((char) => (
             <div key={char.id} className="bg-[#111] border border-[#222] p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-[#222] flex items-center justify-center text-xs font-bold text-[#E8B931]">
-                    {char.name ? char.name.split(" ").map((n) => n[0]).join("") : "?"}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={char.role}
-                      onChange={(e) => updateCharacter(char.id, "role", e.target.value)}
-                      className="text-[10px] tracking-widest uppercase border px-2 py-0.5 bg-[#0A0A0A] border-[#E8B931]/30 text-[#E8B931] appearance-none focus:outline-none"
-                    >
-                      <option value="Protagonist">Protagonist</option>
-                      <option value="Antagonist">Antagonist</option>
-                      <option value="Deuteragonist">Deuteragonist</option>
-                      <option value="Supporting">Supporting</option>
-                      <option value="Minor">Minor</option>
-                    </select>
-                  </div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 bg-[#222] flex items-center justify-center text-xs font-bold text-[#E8B931]">
+                  {char.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
                 </div>
-                {characters.length > 1 && (
-                  <button
-                    onClick={() => removeCharacter(char.id)}
-                    className="text-[#555] p-1"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                <div>
+                  <span className="text-sm font-bold text-[#F5F5F0]">{char.name}</span>
+                  <span className="text-[10px] tracking-widest uppercase border border-[#E8B931]/30 text-[#E8B931] px-1.5 py-0.5 ml-2">
+                    {char.role}
+                  </span>
+                </div>
+              </div>
+              {char.description && <p className="text-xs text-[#666] mb-2">{char.description}</p>}
+              <div className="grid grid-cols-2 gap-4">
+                {char.appearance && (
+                  <div>
+                    <span className="text-[10px] text-[#E8B931] tracking-wider uppercase">Appearance</span>
+                    <p className="text-xs text-[#999] mt-0.5">{char.appearance}</p>
+                  </div>
+                )}
+                {char.personality && (
+                  <div>
+                    <span className="text-[10px] text-[#E8B931] tracking-wider uppercase">Personality</span>
+                    <p className="text-xs text-[#999] mt-0.5">{char.personality}</p>
+                  </div>
                 )}
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Name</label>
-                  <input
-                    type="text"
-                    value={char.name}
-                    onChange={(e) => updateCharacter(char.id, "name", e.target.value)}
-                    placeholder="Character name"
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2 mb-4">
-                <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Description / Backstory</label>
-                <textarea
-                  value={char.description}
-                  onChange={(e) => updateCharacter(char.id, "description", e.target.value)}
-                  rows={2}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                  placeholder="Who is this character? What drives them?"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Visual Appearance</label>
-                  <textarea
-                    value={char.appearance}
-                    onChange={(e) => updateCharacter(char.id, "appearance", e.target.value)}
-                    rows={3}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                    placeholder="Hair, eyes, build, clothing, distinguishing features..."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Personality & Traits</label>
-                  <textarea
-                    value={char.personality}
-                    onChange={(e) => updateCharacter(char.id, "personality", e.target.value)}
-                    rows={3}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                    placeholder="Personality traits, fears, habits, relationships..."
-                  />
-                </div>
-              </div>
             </div>
-          ))}
+          )) : (
+            <div className="bg-[#111] border border-[#222] p-8 text-center">
+              <p className="text-sm text-[#555]">No characters defined yet.</p>
+            </div>
+          )}
         </div>
       )}
 
       {/* ========== WORLD TAB ========== */}
-      {activeTab === "world" && (
-        <div className="space-y-5">
-          <div className="bg-[#111] border border-[#222] p-6 space-y-5">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-              World Building
-            </h3>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Setting Description</label>
-              <textarea
-                value={worldForm.setting}
-                onChange={(e) => setWorldForm({ ...worldForm, setting: e.target.value })}
-                rows={3}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none leading-relaxed"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Time Period</label>
-                <input
-                  type="text"
-                  value={worldForm.timePeriod}
-                  onChange={(e) => setWorldForm({ ...worldForm, timePeriod: e.target.value })}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Atmosphere & Mood</label>
-              <textarea
-                value={worldForm.atmosphere}
-                onChange={(e) => setWorldForm({ ...worldForm, atmosphere: e.target.value })}
-                rows={3}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Technology & Magic Systems</label>
-              <textarea
-                value={worldForm.technology}
-                onChange={(e) => setWorldForm({ ...worldForm, technology: e.target.value })}
-                rows={2}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Key Locations</label>
-              <textarea
-                value={worldForm.keyLocations}
-                onChange={(e) => setWorldForm({ ...worldForm, keyLocations: e.target.value })}
-                rows={2}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                placeholder="Name — brief description, separated by commas or new lines"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">World Rules & Laws</label>
-              <textarea
-                value={worldForm.rules}
-                onChange={(e) => setWorldForm({ ...worldForm, rules: e.target.value })}
-                rows={2}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
-                placeholder="Any rules, laws, or constraints that exist in this world..."
-              />
-            </div>
+      {activeTab === "world" && project && (
+        <div className="bg-[#111] border border-[#222] p-6 space-y-4">
+          <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">World Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[
+              { label: "Setting", value: project.world.setting },
+              { label: "Time Period", value: project.world.timePeriod },
+              { label: "Atmosphere", value: project.world.atmosphere },
+              { label: "Technology", value: project.world.technology },
+              { label: "Key Locations", value: project.world.keyLocations },
+              { label: "World Rules", value: project.world.rules },
+            ].map((item) => (
+              item.value ? (
+                <div key={item.label}>
+                  <span className="text-[10px] text-[#E8B931] tracking-wider uppercase block mb-1">{item.label}</span>
+                  <p className="text-xs text-[#999]">{item.value}</p>
+                </div>
+              ) : null
+            ))}
           </div>
+          {project.roughOverview && (
+            <div className="border-t border-[#222] pt-4 mt-4">
+              <span className="text-[10px] text-[#E8B931] tracking-wider uppercase block mb-2">Story Overview</span>
+              <p className="text-xs text-[#999] leading-relaxed">{project.roughOverview}</p>
+            </div>
+          )}
         </div>
       )}
 
       {/* ========== ART STYLE TAB ========== */}
-      {activeTab === "style" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-[#111] border border-[#222] p-6 space-y-5">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-              Visual Style
-            </h3>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Art Style</label>
-              <select
-                value={styleForm.artStyle}
-                onChange={(e) => setStyleForm({ ...styleForm, artStyle: e.target.value })}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none appearance-none"
-              >
-                <option value="noir-cyberpunk">Noir-Cyberpunk</option>
-                <option value="dark-fantasy">Dark Fantasy</option>
-                <option value="synthwave-pop">Synthwave Pop</option>
-                <option value="military-realism">Military Realism</option>
-                <option value="manga">Manga (Japanese)</option>
-                <option value="manhwa">Manhwa (Korean)</option>
-                <option value="watercolor">Watercolor</option>
-                <option value="comic-book">Classic Comic Book</option>
-                <option value="minimalist">Minimalist</option>
-                <option value="photorealistic">Photorealistic</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Color Palette</label>
-              <select
-                value={styleForm.colorPalette}
-                onChange={(e) => setStyleForm({ ...styleForm, colorPalette: e.target.value })}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none appearance-none"
-              >
-                <option value="dominated-dark">Dark Dominated (Shadows, neon accents)</option>
-                <option value="full-color">Full Color (Vibrant, saturated)</option>
-                <option value="muted-pastel">Muted / Pastel</option>
-                <option value="monochrome">Monochrome / Grayscale</option>
-                <option value="sepia">Sepia / Vintage</option>
-                <option value="high-contrast">High Contrast (Bold blacks, bright highlights)</option>
-              </select>
-              {/* Color preview */}
-              <div className="flex gap-1 mt-2">
-                {["#0D0D0D", "#1A1A2E", "#E8B931", "#C73E1D", "#4A4A6A"].map((c, i) => (
-                  <div key={i} className="flex-1 h-6 border border-[#333]" style={{ backgroundColor: c }} />
-                ))}
+      {activeTab === "style" && project && (
+        <div className="bg-[#111] border border-[#222] p-6">
+          <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">Art Style</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {[
+              { label: "Art Style", value: project.style.artStyle },
+              { label: "Color Palette", value: project.style.colorPalette },
+              { label: "Panel Density", value: project.style.panelDensity },
+              { label: "Speech Bubbles", value: project.style.speechBubbleStyle },
+              { label: "Narration", value: project.style.narrationStyle },
+              { label: "Detail Level", value: project.style.detailLevel },
+            ].map((item) => (
+              <div key={item.label} className="p-3 bg-[#0A0A0A] border border-[#222]">
+                <span className="text-[10px] text-[#555] uppercase tracking-wider block">{item.label}</span>
+                <span className="text-xs text-[#F5F5F0] font-medium capitalize">{item.value}</span>
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Panel Density</label>
-              <select
-                value={styleForm.panelDensity}
-                onChange={(e) => setStyleForm({ ...styleForm, panelDensity: e.target.value })}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none appearance-none"
-              >
-                <option value="sparse">Sparse (1-3 panels per page, cinematic)</option>
-                <option value="medium">Medium (3-5 panels, balanced)</option>
-                <option value="dense">Dense (5-8 panels, detailed)</option>
-                <option value="variable">Variable (AI decides per scene)</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Detail Level</label>
-                <select
-                  value={styleForm.detailLevel}
-                  onChange={(e) => setStyleForm({ ...styleForm, detailLevel: e.target.value })}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none appearance-none"
-                >
-                  <option value="high">High (Detailed)</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low (Stylized)</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Narration Style</label>
-                <select
-                  value={styleForm.narrationStyle}
-                  onChange={(e) => setStyleForm({ ...styleForm, narrationStyle: e.target.value })}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none appearance-none"
-                >
-                  <option value="present">Present Tense</option>
-                  <option value="past">Past Tense</option>
-                  <option value="first-person">First Person</option>
-                  <option value="no-narration">No Narration (Dialogue only)</option>
-                </select>
-              </div>
-            </div>
+            ))}
           </div>
-
-          <div className="space-y-5">
-            <div className="bg-[#111] border border-[#222] p-6 space-y-5">
-              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-                Speech Bubble Style
-              </h3>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { id: "standard", label: "Standard", desc: "Classic rounded bubbles" },
-                  { id: "jagged", label: "Jagged / Explosive", desc: "For shouting, action" },
-                  { id: "square", label: "Square / Rectangular", desc: "For AI, robots, narration" },
-                  { id: "thought", label: "Thought Bubbles", desc: "Cloudy, for inner thoughts" },
-                ].map((style) => (
-                  <button
-                    key={style.id}
-                    className={`p-3 border text-left ${
-                      styleForm.speechBubbleStyle === style.id ? "border-[#E8B931] bg-[#E8B931]/5" : "border-[#222] bg-[#0A0A0A]"
-                    }`}
-                    onClick={() => setStyleForm({ ...styleForm, speechBubbleStyle: style.id })}
-                  >
-                    <div className="text-xs font-medium text-[#F5F5F0]">{style.label}</div>
-                    <div className="text-[10px] text-[#555] mt-0.5">{style.desc}</div>
-                  </button>
-                ))}
-              </div>
+          {project.style.referenceNotes && (
+            <div className="mt-4 p-3 bg-[#0A0A0A] border border-[#222]">
+              <span className="text-[10px] text-[#555] uppercase tracking-wider block mb-1">Reference Notes</span>
+              <p className="text-xs text-[#999]">{project.style.referenceNotes}</p>
             </div>
-
-            <div className="bg-[#111] border border-[#222] p-6 space-y-4">
-              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-                Reference Notes
-              </h3>
-              <textarea
-                value={styleForm.referenceNotes}
-                onChange={(e) => setStyleForm({ ...styleForm, referenceNotes: e.target.value })}
-                rows={6}
-                className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none leading-relaxed"
-                placeholder="Add visual references, inspirations, mood boards, or specific art directions..."
-              />
-              <p className="text-[10px] text-[#555]">
-                Tip: Mention specific artists, movies, games, or comic series as style references. The more specific, the better the output.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========== PAGES TAB ========== */}
-      {activeTab === "pages" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Page list */}
-          <div className="bg-[#111] border border-[#222] overflow-hidden">
-            <div className="px-4 py-3 border-b border-[#222] flex items-center justify-between">
-              <span className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">All Pages</span>
-              <span className="text-[10px] text-[#555]">{pages.length} pages</span>
-            </div>
-            <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
-              {pages.map((page) => (
-                <button
-                  key={page.id}
-                  onClick={() => setSelectedPage(page.number)}
-                  className={`w-full text-left px-4 py-3 border-b border-[#222]/50 flex items-center gap-3 ${
-                    selectedPage === page.number ? "bg-[#E8B931]/5 border-l-2 border-l-[#E8B931]" : ""
-                  }`}
-                >
-                  <div className={`w-7 h-7 flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                    page.status === "approved" ? "bg-[#E8B931]/20 text-[#E8B931]" :
-                    page.status === "in-review" ? "bg-[#999]/20 text-[#999]" :
-                    "bg-[#555]/20 text-[#555]"
-                  }`}>
-                    {page.number}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-[#F5F5F0] truncate">{page.title}</div>
-                    <div className="text-[10px] text-[#555]">{page.panels} panels</div>
-                  </div>
-                  <span className={`text-[9px] tracking-widest uppercase px-1.5 py-0.5 border ${
-                    page.status === "approved" ? "border-[#E8B931]/30 text-[#E8B931]" :
-                    page.status === "in-review" ? "border-[#999]/30 text-[#999]" :
-                    "border-[#555]/30 text-[#555]"
-                  }`}>
-                    {page.status === "in-review" ? "Review" : page.status === "generating" ? "Gen..." : "Done"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Page preview */}
-          <div className="lg:col-span-2 bg-[#111] border border-[#222] p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-                  Page {selectedPage} Preview
-                </h3>
-                <div className="text-xs text-[#666] mt-1">
-                  {pages.find((p) => p.number === selectedPage)?.title}
-                </div>
-              </div>
-              {pages.find((p) => p.number === selectedPage)?.status === "in-review" && (
-                <div className="flex items-center gap-2">
-                  <button className="px-4 py-2 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase flex items-center gap-1">
-                    <RotateCcw className="w-3 h-3" /> Revise
-                  </button>
-                  <button className="px-4 py-2 bg-[#E8B931] text-[#0A0A0A] font-bold text-xs tracking-wide uppercase flex items-center gap-1">
-                    <Check className="w-3 h-3" /> Approve
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Comic page mockup */}
-            <div className="border-2 border-[#222] bg-[#0A0A0A] aspect-[3/4] relative overflow-hidden">
-              {/* Simulated comic panels */}
-              <div className="absolute inset-3 grid grid-cols-3 grid-rows-3 gap-1.5">
-                <div className="col-span-2 row-span-2 bg-[#1A1A1A] relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-br from-[#1A1A2E] to-[#0D0D0D] flex items-end p-3">
-                    <div className="space-y-1">
-                      <div className="text-[10px] text-[#E8B931] font-bold">KAI</div>
-                      <div className="w-32 h-4 bg-[#222] rounded-sm" />
-                      <div className="w-24 h-4 bg-[#222] rounded-sm" />
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-[#1A1A1A] relative">
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#1A1A2E] to-[#222]" />
-                </div>
-                <div className="bg-[#1A1A1A] relative">
-                  <div className="absolute inset-0 bg-gradient-to-br from-[#252015] to-[#1A1A1A]" />
-                </div>
-                <div className="col-span-2 bg-[#1A1A1A] relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#0D0D0D] to-[#1A1A2E] flex items-center justify-center">
-                    <div className="text-[10px] text-[#555] tracking-widest uppercase">Panel 3 — City Skyline</div>
-                  </div>
-                </div>
-                <div className="row-span-2 bg-[#1A1A1A] relative">
-                  <div className="absolute inset-0 bg-gradient-to-b from-[#1A1A22] to-[#0D0D0D]" />
-                </div>
-                <div className="bg-[#1A1A1A] relative">
-                  <div className="absolute inset-0 bg-gradient-to-l from-[#201A1A] to-[#1A1A1A]" />
-                </div>
-              </div>
-
-              {/* Page number */}
-              <div className="absolute bottom-2 right-3 w-6 h-6 border border-[#E8B931] flex items-center justify-center text-[8px] text-[#E8B931]">
-                {selectedPage}
-              </div>
-            </div>
-
-            {/* Panel details */}
-            <div className="mt-4 grid grid-cols-4 gap-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="bg-[#0A0A0A] border border-[#222] p-2 text-center">
-                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Panel {i + 1}</div>
-                  <div className="w-full h-1 bg-[#222] mt-1">
-                    <div className="h-full bg-[#E8B931] w-full" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
         </div>
       )}
     </div>
