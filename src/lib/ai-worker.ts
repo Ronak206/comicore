@@ -1,9 +1,10 @@
 /**
  * Comicore AI Worker Client
  *
- * Loosely coupled client that talks to the Cloudflare Worker API.
- * All AI calls route through this single module — the rest of the
- * codebase never touches fetch/AI directly.
+ * Calls the Cloudflare Worker for model routing.
+ * The Worker handles which model to use per endpoint and the pipeline flow.
+ *
+ * Worker URL: https://comicore.robin241205.workers.dev
  *
  * Endpoints:
  *   POST /write    — Claude Sonnet 4.5 (story, dialogue, scripts)
@@ -14,8 +15,7 @@
 
 // ─── Config ──────────────────────────────────────
 
-const WORKER_URL = process.env.AI_WORKER_URL || "https://comicore-ai-router.your-subdomain.workers.dev";
-const API_KEY = process.env.AI_API_KEY || "sk-onRjqG1aC1qN1lrpArhdn16QjqTExJW2hX-ZSqkMNgY";
+const WORKER_URL = process.env.AI_WORKER_URL || "https://comicore.robin241205.workers.dev";
 
 // ─── Types ───────────────────────────────────────
 
@@ -67,10 +67,13 @@ async function callWorker(endpoint: string, body: AIRequest): Promise<Response> 
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      system: body.system,
+      user: body.user,
+      history: body.history || [],
+    }),
   });
 
   if (!res.ok) {

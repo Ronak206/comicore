@@ -116,12 +116,12 @@ export default function DashboardLayout({
         {/* Sidebar footer */}
         <div className="p-4 border-t border-[#222]">
           <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 bg-[#222] flex items-center justify-center text-xs font-bold text-[#E8B931]">
-              JD
+            <div className="w-8 h-8 bg-[#E8B931]/20 flex items-center justify-center text-xs font-bold text-[#E8B931]">
+              <Zap className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-[#F5F5F0] truncate">John Doe</div>
-              <div className="text-xs text-[#555] truncate">Free Plan</div>
+              <div className="text-sm font-medium text-[#F5F5F0] truncate">Creator</div>
+              <div className="text-xs text-[#555] truncate">comicore</div>
             </div>
           </div>
         </div>
@@ -168,8 +168,8 @@ export default function DashboardLayout({
                 <Bell className="w-5 h-5" />
                 <div className="absolute top-1 right-1 w-2 h-2 bg-[#E8B931]" />
               </button>
-              <div className="w-8 h-8 bg-[#222] flex items-center justify-center text-xs font-bold text-[#E8B931]">
-                JD
+              <div className="w-8 h-8 bg-[#E8B931]/20 flex items-center justify-center">
+                <Zap className="w-4 h-4 text-[#E8B931]" />
               </div>
             </div>
           </div>
