@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -148,8 +148,13 @@ export default function CreateComicPage() {
   };
 
   // ─── Save Project (steps 1-3) ──────────────────
-  const saveProject = async (): Promise<boolean> => {
-    if (projectId) return true; // already saved
+  // Returns the project ID on success, or null on failure.
+  // Uses a local ref to avoid React state race conditions.
+  const projectIdRef = useRef<string | null>(null);
+
+  const saveProject = async (): Promise<string | null> => {
+    // Use ref first (always up-to-date), fall back to state
+    if (projectIdRef.current) return projectIdRef.current;
 
     setLoading(true);
     setError(null);
@@ -167,11 +172,13 @@ export default function CreateComicPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
-      setProjectId(data.data.id);
-      return true;
+      const id = data.data.id;
+      projectIdRef.current = id;
+      setProjectId(id);
+      return id;
     } catch (err: any) {
       setError(err.message || "Failed to save project");
-      return false;
+      return null;
     } finally {
       setLoading(false);
     }
@@ -179,10 +186,9 @@ export default function CreateComicPage() {
 
   // ─── Generate Overview (step 4) ────────────────
   const handleGenerateOverview = async () => {
-    if (!projectId) {
-      const saved = await saveProject();
-      if (!saved) return;
-    }
+    // Always get a fresh projectId from saveProject (uses ref internally)
+    const id = await saveProject();
+    if (!id) return;
 
     setLoading(true);
     setError(null);
@@ -190,7 +196,7 @@ export default function CreateComicPage() {
       const res = await fetch("/api/engine/overview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
+        body: JSON.stringify({ projectId: id }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -204,7 +210,8 @@ export default function CreateComicPage() {
 
   // ─── Generate Chapters (step 5) ────────────────
   const handleGenerateChapters = async () => {
-    if (!projectId) return;
+    const id = projectIdRef.current;
+    if (!id) return;
 
     setLoading(true);
     setError(null);
@@ -212,7 +219,7 @@ export default function CreateComicPage() {
       const res = await fetch("/api/engine/chapters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
+        body: JSON.stringify({ projectId: id }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -227,19 +234,20 @@ export default function CreateComicPage() {
 
   // ─── Start Building (finish) ──────────────────
   const handleStartBuilding = () => {
-    if (projectId) {
-      router.push(`/dashboard/comic/${projectId}`);
+    const id = projectIdRef.current || projectId;
+    if (id) {
+      router.push(`/dashboard/comic/${id}`);
     }
   };
 
   // ─── Handle Next with side-effects ─────────────
   const handleNext = async () => {
     if (currentStep === "style") {
-      // Save project before overview
-      const saved = await saveProject();
-      if (saved) {
+      // Save project before overview — saveProject returns the ID directly
+      const id = await saveProject();
+      if (id) {
         setCurrentStep("overview");
-        // Auto-generate overview
+        // Auto-generate overview (it will use ref, so safe to call)
         handleGenerateOverview();
       }
     } else if (currentStep === "overview" && overview) {
