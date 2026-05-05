@@ -185,6 +185,37 @@ To handle unlimited pages without running out of context:
 
 ---
 
+## AI Pipeline
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   COMICORE PIPELINE                  │
+├─────────────────────────────────────────────────────┤
+│                                                      │
+│  Story Setup                                         │
+│    └── claude-sonnet-4.5 (story bible creation)     │
+│                                                      │
+│  Page Generation Loop                                │
+│    ├── claude-sonnet-4.5-thinking (plan page)       │
+│    ├── claude-sonnet-4.5 (write script + dialogue)  │
+│    ├── gpt-4o (structured layout/JSON output)       │
+│    └── glm-5-thinking (consistency validation)      │
+│                                                      │
+│  User Review → Revision                              │
+│    └── deepseek-3.2-thinking (process feedback)     │
+│                                                      │
+│  Memory System                                       │
+│    ├── claude-haiku-4.5 (page summaries)            │
+│    └── glm-5-thinking (context database)            │
+│                                                      │
+│  Export                                              │
+│    └── gpt-4o (format conversion scripts)           │
+│                                                      │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Project Structure
 
 ```
