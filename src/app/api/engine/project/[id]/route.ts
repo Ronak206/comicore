@@ -11,7 +11,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const project = getProject(id);
+    const project = await getProject(id);
 
     if (!project) {
       return NextResponse.json({ success: false, error: "Project not found." }, { status: 404 });

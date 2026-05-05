@@ -1,92 +1,45 @@
 /**
- * Comicore File-Based Database
+ * Comicore Database Layer
  *
- * Uses JSON files stored in /data/ directory as a simple database.
- * Each project gets its own JSON file. An index file tracks all projects.
+ * MongoDB-backed data access. All collections:
+ *   - User: user accounts
+ *   - Book: comic projects (with embedded chapters + storyBeats + style)
+ *   - Character: characters (linked to Book)
+ *   - World: world settings (linked to Book)
+ *   - Page: comic pages (linked to Book)
  *
- * Structure:
- *   /data/
- *     index.json          — list of all project IDs + metadata
- *     {projectId}.json    — full project data (characters, world, pages, chapters)
+ * This module is the ONLY place that touches Mongoose models.
+ * Everything else imports from here.
  */
 
-import fs from "fs";
-import path from "path";
+import { connectDB } from "./mongodb";
+import Book from "./models/Book";
+import Character from "./models/Character";
+import World from "./models/World";
+import Page from "./models/Page";
+import type {
+  IBook,
+  IChapter,
+  IStoryBeat,
+  IArtStyle,
+  BookStatus,
+  ICharacter,
+  CharacterRole,
+  IWorld,
+  IPage,
+  IPanel,
+  PageStatus,
+} from "./models/Book";
 
-// ─── Types ───────────────────────────────────────
+// ─── Ensure Connection ──────────────────────────
 
-export interface Character {
-  id: string;
-  name: string;
-  role: "Protagonist" | "Antagonist" | "Deuteragonist" | "Supporting" | "Minor";
-  description: string;
-  appearance: string;
-  personality: string;
+async function db(): Promise<void> {
+  await connectDB();
 }
 
-export interface WorldSetting {
-  setting: string;
-  timePeriod: string;
-  atmosphere: string;
-  technology: string;
-  keyLocations: string;
-  rules: string;
-}
+// ─── Types (public) ─────────────────────────────
 
-export interface ArtStyle {
-  artStyle: string;
-  colorPalette: string;
-  panelDensity: string;
-  speechBubbleStyle: string;
-  narrationStyle: string;
-  detailLevel: string;
-  referenceNotes: string;
-}
-
-export interface StoryBeat {
-  num: string;
-  title: string;
-  description: string;
-  pageRange: string;
-}
-
-export interface Chapter {
-  id: string;
-  number: number;
-  title: string;
-  description: string;
-  pageRange: string;
-  pageCount: number;
-  pages: string[]; // page IDs
-}
-
-export interface Panel {
-  panelNumber: number;
-  description: string;
-  dialogue: Array<{
-    character: string;
-    text: string;
-    type: "speech" | "thought" | "narration" | "sfx";
-  }>;
-  cameraAngle: string;
-  mood: string;
-  imageUrl?: string;
-}
-
-export interface ComicPage {
-  id: string;
-  number: number;
-  title: string;
-  status: "generating" | "in-review" | "approved" | "revised";
-  panels: Panel[];
-  script: string;
-  userInstructions?: string;
-  feedback?: string;
-  generatedAt: string;
-  approvedAt?: string;
-}
-
-export interface ProjectData {
+export type ProjectData = {
   id: string;
   title: string;
   genre: string;
@@ -94,20 +47,20 @@ export interface ProjectData {
   tone: string;
   targetAudience: string;
   pageGoal: number;
-  characters: Character[];
-  world: WorldSetting;
-  style: ArtStyle;
-  storyBeats: StoryBeat[];
-  chapters: Chapter[];
-  pages: ComicPage[];
+  characters: ICharacter[];
+  world: IWorld;
+  style: IArtStyle;
+  storyBeats: IStoryBeat[];
+  chapters: IChapter[];
+  pages: IPage[];
   roughOverview: string;
-  status: "setup" | "overview" | "chapters" | "generating" | "reviewing" | "complete";
+  status: BookStatus;
   currentPage: number;
   createdAt: string;
   updatedAt: string;
-}
+};
 
-export interface ProjectIndex {
+export type ProjectIndex = {
   id: string;
   title: string;
   genre: string;
@@ -116,238 +69,290 @@ export interface ProjectIndex {
   totalPages: number;
   createdAt: string;
   updatedAt: string;
+};
+
+// ─── Helpers: MongoDB → ProjectData ──────────────
+
+async function toProjectData(bookDoc: IBook): Promise<ProjectData> {
+  const characters = await Character.find({ bookId: bookDoc._id }).lean();
+  const worldDoc = await World.findOne({ bookId: bookDoc._id }).lean();
+  const pages = await Page.find({ bookId: bookDoc._id }).sort({ number: 1 }).lean();
+
+  const world = worldDoc
+    ? {
+        setting: worldDoc.setting,
+        timePeriod: worldDoc.timePeriod,
+        atmosphere: worldDoc.atmosphere,
+        technology: worldDoc.technology,
+        keyLocations: worldDoc.keyLocations,
+        rules: worldDoc.rules,
+      }
+    : {
+        setting: "",
+        timePeriod: "",
+        atmosphere: "",
+        technology: "",
+        keyLocations: "",
+        rules: "",
+      };
+
+  return {
+    id: bookDoc._id.toString(),
+    title: bookDoc.title,
+    genre: bookDoc.genre,
+    synopsis: bookDoc.synopsis,
+    tone: bookDoc.tone,
+    targetAudience: bookDoc.targetAudience,
+    pageGoal: bookDoc.pageGoal,
+    characters: characters.map((c) => ({
+      ...c,
+      id: c._id.toString(),
+      bookId: c.bookId.toString(),
+    })),
+    world,
+    style: bookDoc.style,
+    storyBeats: bookDoc.storyBeats,
+    chapters: bookDoc.chapters,
+    pages: pages.map((p) => ({
+      ...p,
+      id: p._id.toString(),
+      bookId: p.bookId.toString(),
+    })),
+    roughOverview: bookDoc.roughOverview,
+    status: bookDoc.status,
+    currentPage: bookDoc.currentPage,
+    createdAt: bookDoc.createdAt.toISOString(),
+    updatedAt: bookDoc.updatedAt.toISOString(),
+  };
 }
 
-// ─── Data Directory ──────────────────────────────
+// ─── Book CRUD ──────────────────────────────────
 
-const DATA_DIR = path.join(process.cwd(), "data");
-
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-// ─── Index Operations ────────────────────────────
-
-function getIndex(): ProjectIndex[] {
-  ensureDataDir();
-  const indexPath = path.join(DATA_DIR, "index.json");
-  if (!fs.existsSync(indexPath)) {
-    fs.writeFileSync(indexPath, "[]", "utf-8");
-    return [];
-  }
-  const raw = fs.readFileSync(indexPath, "utf-8");
-  return JSON.parse(raw) as ProjectIndex[];
-}
-
-function writeIndex(index: ProjectIndex[]): void {
-  ensureDataDir();
-  const indexPath = path.join(DATA_DIR, "index.json");
-  fs.writeFileSync(indexPath, JSON.stringify(index, null, 2), "utf-8");
-}
-
-// ─── Project CRUD ────────────────────────────────
-
-export function createProject(data: {
+export async function createProject(data: {
   title: string;
   genre: string;
   synopsis: string;
   tone: string;
   targetAudience: string;
   pageGoal: number;
-}): ProjectData {
-  ensureDataDir();
-  const id = `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const now = new Date().toISOString();
+}): Promise<ProjectData> {
+  await db();
 
-  const project: ProjectData = {
-    id,
+  const book = await Book.create({
     title: data.title.trim(),
     genre: data.genre.trim(),
     synopsis: data.synopsis.trim(),
     tone: data.tone.trim(),
     targetAudience: data.targetAudience,
     pageGoal: data.pageGoal,
-    characters: [],
-    world: {
-      setting: "",
-      timePeriod: "",
-      atmosphere: "",
-      technology: "",
-      keyLocations: "",
-      rules: "",
-    },
-    style: {
-      artStyle: "noir-cyberpunk",
-      colorPalette: "dominated-dark",
-      panelDensity: "medium",
-      speechBubbleStyle: "standard",
-      narrationStyle: "present",
-      detailLevel: "high",
-      referenceNotes: "",
-    },
-    storyBeats: [],
-    chapters: [],
-    pages: [],
-    roughOverview: "",
-    status: "setup",
-    currentPage: 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  // Write project file
-  const projectPath = path.join(DATA_DIR, `${id}.json`);
-  fs.writeFileSync(projectPath, JSON.stringify(project, null, 2), "utf-8");
-
-  // Update index
-  const index = getIndex();
-  index.push({
-    id: project.id,
-    title: project.title,
-    genre: project.genre,
-    status: project.status,
-    pages: 0,
-    totalPages: project.pageGoal,
-    createdAt: now,
-    updatedAt: now,
   });
-  writeIndex(index);
 
-  return project;
+  return toProjectData(book);
 }
 
-export function getProject(id: string): ProjectData | null {
-  ensureDataDir();
-  const projectPath = path.join(DATA_DIR, `${id}.json`);
-  if (!fs.existsSync(projectPath)) return null;
-  const raw = fs.readFileSync(projectPath, "utf-8");
-  return JSON.parse(raw) as ProjectData;
+export async function getProject(id: string): Promise<ProjectData | null> {
+  await db();
+
+  const book = await Book.findById(id);
+  if (!book) return null;
+
+  return toProjectData(book);
 }
 
-export function updateProject(id: string, updates: Partial<ProjectData>): ProjectData | null {
-  const project = getProject(id);
-  if (!project) return null;
+export async function getAllProjects(): Promise<ProjectIndex[]> {
+  await db();
 
-  const updated = { ...project, ...updates, updatedAt: new Date().toISOString() };
-  const projectPath = path.join(DATA_DIR, `${id}.json`);
-  fs.writeFileSync(projectPath, JSON.stringify(updated, null, 2), "utf-8");
+  const books = await Book.find().sort({ updatedAt: -1 });
 
-  // Update index
-  const index = getIndex();
-  const idx = index.findIndex((p) => p.id === id);
-  if (idx !== -1) {
-    index[idx] = {
-      id: updated.id,
-      title: updated.title,
-      genre: updated.genre,
-      status: updated.status,
-      pages: updated.pages.filter((p) => p.status === "approved").length,
-      totalPages: updated.pageGoal,
-      createdAt: updated.createdAt,
-      updatedAt: updated.updatedAt,
-    };
-    writeIndex(index);
+  const indices: ProjectIndex[] = [];
+  for (const book of books) {
+    const approvedCount = await Page.countDocuments({
+      bookId: book._id,
+      status: "approved",
+    });
+    indices.push({
+      id: book._id.toString(),
+      title: book.title,
+      genre: book.genre,
+      status: book.status,
+      pages: approvedCount,
+      totalPages: book.pageGoal,
+      createdAt: book.createdAt.toISOString(),
+      updatedAt: book.updatedAt.toISOString(),
+    });
   }
 
-  return updated;
+  return indices;
 }
 
-export function deleteProject(id: string): boolean {
-  ensureDataDir();
-  const projectPath = path.join(DATA_DIR, `${id}.json`);
-  if (!fs.existsSync(projectPath)) return false;
+export async function updateProject(
+  id: string,
+  updates: Partial<{
+    title: string;
+    genre: string;
+    synopsis: string;
+    tone: string;
+    targetAudience: string;
+    pageGoal: number;
+    status: BookStatus;
+    currentPage: number;
+    roughOverview: string;
+    style: Partial<IArtStyle>;
+    chapters: IChapter[];
+    storyBeats: IStoryBeat[];
+  }>
+): Promise<ProjectData | null> {
+  await db();
 
-  fs.unlinkSync(projectPath);
+  const updateFields: any = { ...updates };
+  // Flatten style into dot notation
+  if (updates.style) {
+    Object.entries(updates.style).forEach(([key, val]) => {
+      updateFields[`style.${key}`] = val;
+    });
+    delete updateFields.style;
+  }
 
-  const index = getIndex().filter((p) => p.id !== id);
-  writeIndex(index);
+  const book = await Book.findByIdAndUpdate(id, updateFields, { new: true });
+  if (!book) return null;
 
-  return true;
+  return toProjectData(book);
 }
 
-export function getAllProjects(): ProjectIndex[] {
-  return getIndex().sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+export async function deleteProject(id: string): Promise<boolean> {
+  await db();
+
+  await Character.deleteMany({ bookId: id });
+  await World.deleteMany({ bookId: id });
+  await Page.deleteMany({ bookId: id });
+  const result = await Book.findByIdAndDelete(id);
+
+  return !!result;
 }
 
-export function addCharacter(projectId: string, character: Omit<Character, "id">): ProjectData | null {
-  const project = getProject(projectId);
-  if (!project) return null;
+// ─── Character CRUD ─────────────────────────────
 
-  const newChar: Character = {
+export async function addCharacter(
+  projectId: string,
+  character: { name: string; role: CharacterRole; description: string; appearance: string; personality: string }
+): Promise<ProjectData | null> {
+  await db();
+
+  await Character.create({
+    bookId: projectId,
     ...character,
-    id: `char_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-  };
+    name: character.name.trim(),
+  });
 
-  project.characters.push(newChar);
-  return updateProject(projectId, { characters: project.characters });
+  return getProject(projectId);
 }
 
-export function updateCharacter(projectId: string, charId: string, updates: Partial<Character>): ProjectData | null {
-  const project = getProject(projectId);
-  if (!project) return null;
+export async function updateCharacter(
+  projectId: string,
+  charId: string,
+  updates: Partial<ICharacter>
+): Promise<ProjectData | null> {
+  await db();
 
-  project.characters = project.characters.map((c) =>
-    c.id === charId ? { ...c, ...updates } : c
+  await Character.findByIdAndUpdate(charId, updates);
+  return getProject(projectId);
+}
+
+export async function removeCharacter(
+  projectId: string,
+  charId: string
+): Promise<ProjectData | null> {
+  await db();
+
+  await Character.findByIdAndDelete(charId);
+  return getProject(projectId);
+}
+
+// ─── World CRUD ─────────────────────────────────
+
+export async function upsertWorld(
+  projectId: string,
+  world: { setting: string; timePeriod: string; atmosphere: string; technology: string; keyLocations: string; rules: string }
+): Promise<ProjectData | null> {
+  await db();
+
+  await World.findOneAndUpdate(
+    { bookId: projectId },
+    { bookId: projectId, ...world },
+    { upsert: true, new: true }
   );
-  return updateProject(projectId, { characters: project.characters });
+
+  return getProject(projectId);
 }
 
-export function removeCharacter(projectId: string, charId: string): ProjectData | null {
-  const project = getProject(projectId);
-  if (!project) return null;
+// ─── Page CRUD ──────────────────────────────────
 
-  project.characters = project.characters.filter((c) => c.id !== charId);
-  return updateProject(projectId, { characters: project.characters });
-}
+export async function addPage(
+  projectId: string,
+  page: { number: number; title: string; status: PageStatus; panels: IPanel[]; script: string; userInstructions?: string }
+): Promise<ProjectData | null> {
+  await db();
 
-export function addPage(projectId: string, page: Omit<ComicPage, "id">): ProjectData | null {
-  const project = getProject(projectId);
-  if (!project) return null;
+  // Check if page with this number already exists
+  const existing = await Page.findOne({ bookId: projectId, number: page.number });
+  if (existing) {
+    await Page.findByIdAndUpdate(existing._id, page, { new: true });
+  } else {
+    await Page.create({
+      bookId: projectId,
+      ...page,
+      generatedAt: new Date(),
+    });
+  }
 
-  const newPage: ComicPage = {
-    ...page,
-    id: `page_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-  };
-
-  project.pages.push(newPage);
-  project.currentPage = project.pages.length;
-  return updateProject(projectId, {
-    pages: project.pages,
-    currentPage: project.currentPage,
+  // Update book's currentPage
+  await Book.findByIdAndUpdate(projectId, {
+    currentPage: page.number,
     status: "reviewing",
   });
+
+  return getProject(projectId);
 }
 
-export function approvePage(projectId: string, pageId: string): ProjectData | null {
-  const project = getProject(projectId);
-  if (!project) return null;
+export async function approvePage(
+  projectId: string,
+  pageId: string
+): Promise<ProjectData | null> {
+  await db();
 
-  const approvedPages = project.pages.filter((p) => p.status === "approved").length;
+  await Page.findByIdAndUpdate(pageId, {
+    status: "approved",
+    approvedAt: new Date(),
+  });
 
-  project.pages = project.pages.map((p) =>
-    p.id === pageId
-      ? { ...p, status: "approved" as const, approvedAt: new Date().toISOString() }
-      : p
-  );
+  const book = await Book.findById(projectId);
+  if (!book) return null;
 
-  const allApproved = project.pages.filter((p) => p.status === "approved").length;
-  const isComplete = allApproved >= project.pageGoal;
+  const allApproved = await Page.countDocuments({
+    bookId: projectId,
+    status: "approved",
+  });
 
-  return updateProject(projectId, {
-    pages: project.pages,
+  const isComplete = allApproved >= book.pageGoal;
+
+  await Book.findByIdAndUpdate(projectId, {
     status: isComplete ? "complete" : "generating",
   });
+
+  return getProject(projectId);
 }
 
-export function revisePage(projectId: string, pageId: string, feedback: string): ProjectData | null {
-  const project = getProject(projectId);
-  if (!project) return null;
+export async function revisePage(
+  projectId: string,
+  pageId: string,
+  feedback: string
+): Promise<ProjectData | null> {
+  await db();
 
-  project.pages = project.pages.map((p) =>
-    p.id === pageId ? { ...p, status: "revised" as const, feedback } : p
-  );
+  await Page.findByIdAndUpdate(pageId, {
+    status: "revised",
+    feedback,
+  });
 
-  return updateProject(projectId, { pages: project.pages });
+  return getProject(projectId);
 }

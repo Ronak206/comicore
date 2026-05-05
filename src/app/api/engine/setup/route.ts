@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create project
-    const project = createNewProject({
+    const project = await createNewProject({
       title: body.title,
       genre: body.genre || "Sci-Fi",
       synopsis: body.synopsis,
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     if (body.characters && Array.isArray(body.characters)) {
       for (const char of body.characters) {
         if (char.name?.trim()) {
-          addProjectCharacter(project.id, {
+          await addProjectCharacter(project.id, {
             name: char.name.trim(),
             role: char.role || "Supporting",
             description: char.description || "",
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     // Update world if provided
     if (body.world) {
-      updateProjectWorld(project.id, {
+      await updateProjectWorld(project.id, {
         setting: body.world.setting || "",
         timePeriod: body.world.timePeriod || "",
         atmosphere: body.world.atmosphere || "",
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     // Update style if provided
     if (body.style) {
-      updateProjectStyle(project.id, {
+      await updateProjectStyle(project.id, {
         artStyle: body.style.artStyle || "noir-cyberpunk",
         colorPalette: body.style.colorPalette || "dominated-dark",
         panelDensity: body.style.panelDensity || "medium",
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     // Re-fetch to get all updated data
     const { getProjectData } = await import("@/lib/story-engine");
-    const finalProject = getProjectData(project.id);
+    const finalProject = await getProjectData(project.id);
 
     return NextResponse.json({ success: true, data: finalProject }, { status: 201 });
   } catch (error: any) {

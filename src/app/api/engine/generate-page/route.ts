@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "projectId is required." }, { status: 400 });
     }
 
-    const project = getProjectData(body.projectId);
+    const project = await getProjectData(body.projectId);
     if (!project) {
       return NextResponse.json({ success: false, error: "Project not found." }, { status: 404 });
     }

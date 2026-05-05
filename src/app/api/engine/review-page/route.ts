@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "projectId and pageId are required." }, { status: 400 });
     }
 
-    const project = approveCurrentPage(body.projectId, body.pageId);
+    const project = await approveCurrentPage(body.projectId, body.pageId);
 
     if (!project) {
       return NextResponse.json({ success: false, error: "Project or page not found." }, { status: 404 });

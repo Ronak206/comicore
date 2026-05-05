@@ -2,7 +2,7 @@
  * Comicore Story Engine
  *
  * The core orchestration layer that ties together the AI Worker
- * and the file-based database. This is the ONLY module that should
+ * and the MongoDB database. This is the ONLY module that should
  * coordinate between AI calls and DB operations.
  *
  * Flow:
@@ -33,37 +33,38 @@ import {
   addPage,
   approvePage as dbApprovePage,
   revisePage as dbRevisePage,
+  upsertWorld,
   type ProjectData,
 } from "./db";
 
 // ─── Setup ───────────────────────────────────────
 
-export function createNewProject(data: {
+export async function createNewProject(data: {
   title: string;
   genre: string;
   synopsis: string;
   tone: string;
   targetAudience: string;
   pageGoal: number;
-}): ProjectData {
+}): Promise<ProjectData> {
   return createProject(data);
 }
 
-export function addProjectCharacter(
+export async function addProjectCharacter(
   projectId: string,
   character: { name: string; role: "Protagonist" | "Antagonist" | "Deuteragonist" | "Supporting" | "Minor"; description: string; appearance: string; personality: string }
 ) {
   return addCharacter(projectId, character);
 }
 
-export function updateProjectWorld(
+export async function updateProjectWorld(
   projectId: string,
   world: ProjectData["world"]
 ) {
-  return updateProject(projectId, { world });
+  return upsertWorld(projectId, world);
 }
 
-export function updateProjectStyle(
+export async function updateProjectStyle(
   projectId: string,
   style: ProjectData["style"]
 ) {
@@ -73,7 +74,7 @@ export function updateProjectStyle(
 // ─── AI: Generate Rough Overview ─────────────────
 
 export async function generateOverview(projectId: string): Promise<{ overview: string; project: ProjectData }> {
-  const project = getProject(projectId);
+  const project = await getProject(projectId);
   if (!project) throw new Error("Project not found");
 
   const characterSummary = project.characters
@@ -113,7 +114,7 @@ Write a rough story overview that covers the full narrative arc.`,
   const response = await aiWrite(req);
   const overview = extractContent(response);
 
-  const updated = updateProject(projectId, {
+  const updated = await updateProject(projectId, {
     roughOverview: overview,
     status: "overview",
   });
@@ -139,7 +140,7 @@ export async function generateChapterPlan(projectId: string): Promise<{
   }>;
   project: ProjectData;
 }> {
-  const project = getProject(projectId);
+  const project = await getProject(projectId);
   if (!project) throw new Error("Project not found");
 
   const characterSummary = project.characters
@@ -187,7 +188,6 @@ Break this into chapters and story beats. Return ONLY JSON.`,
   try {
     parsed = JSON.parse(rawContent);
   } catch {
-    // Fallback: try to extract JSON from the response
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       parsed = JSON.parse(jsonMatch[0]);
@@ -203,7 +203,6 @@ Break this into chapters and story beats. Return ONLY JSON.`,
     description: ch.description || "",
     pageRange: ch.pageRange || "",
     pageCount: ch.pageCount || 4,
-    pages: [],
   }));
 
   const storyBeats = (parsed.storyBeats || []).map((sb: any) => ({
@@ -213,7 +212,7 @@ Break this into chapters and story beats. Return ONLY JSON.`,
     pageRange: sb.pageRange || "",
   }));
 
-  const updated = updateProject(projectId, {
+  const updated = await updateProject(projectId, {
     chapters,
     storyBeats,
     status: "chapters",
@@ -229,7 +228,9 @@ export async function generateNextPage(
   userInstructions?: string
 ): Promise<{
   page: {
+    id: string;
     title: string;
+    number: number;
     script: string;
     panels: Array<{
       panelNumber: number;
@@ -242,7 +243,7 @@ export async function generateNextPage(
   validation: string;
   project: ProjectData;
 }> {
-  const project = getProject(projectId);
+  const project = await getProject(projectId);
   if (!project) throw new Error("Project not found");
 
   const nextPageNum = project.pages.length + 1;
@@ -325,7 +326,6 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
     if (jsonMatch) {
       parsed = JSON.parse(jsonMatch[0]);
     } else {
-      // Fallback: create a basic page from the text
       parsed = {
         title: `Page ${nextPageNum}`,
         script: claudeContent,
@@ -357,13 +357,18 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
     })),
     script: parsed.script || claudeContent,
     userInstructions,
-    generatedAt: new Date().toISOString(),
   };
 
-  const updatedProject = addPage(projectId, pageData);
+  const updatedProject = await addPage(projectId, pageData);
+
+  // Get the actual page ID from the updated project
+  const newPage = updatedProject?.pages.find((p) => p.number === nextPageNum);
 
   return {
-    page: pageData,
+    page: {
+      ...pageData,
+      id: newPage?.id || `page_${Date.now()}`,
+    },
     validation,
     project: updatedProject!,
   };
@@ -377,7 +382,9 @@ export async function reviseCurrentPage(
   feedback: string
 ): Promise<{
   page: {
+    id: string;
     title: string;
+    number: number;
     script: string;
     panels: Array<{
       panelNumber: number;
@@ -390,14 +397,14 @@ export async function reviseCurrentPage(
   validation: string;
   project: ProjectData;
 }> {
-  const project = getProject(projectId);
+  const project = await getProject(projectId);
   if (!project) throw new Error("Project not found");
 
   const page = project.pages.find((p) => p.id === pageId);
   if (!page) throw new Error("Page not found");
 
   // Mark as revised first
-  dbRevisePage(projectId, pageId, feedback);
+  await dbRevisePage(projectId, pageId, feedback);
 
   // Use think endpoint for revision analysis
   const req: AIRequest = {
@@ -439,9 +446,9 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
     }
   }
 
-  // Update the page in the project
-  const revisedPage = {
-    ...page,
+  // Update the page in MongoDB
+  const PageModel = (await import("./models/Page")).default;
+  await PageModel.findByIdAndUpdate(pageId, {
     title: parsed.title || page.title,
     script: parsed.script || rawContent,
     panels: (parsed.panels || page.panels).map((p: any, i: number) => ({
@@ -455,27 +462,39 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
       cameraAngle: p.cameraAngle || "medium-shot",
       mood: p.mood || project.tone,
     })),
-    status: "in-review" as const,
+    status: "in-review",
     feedback,
-    generatedAt: new Date().toISOString(),
-  };
-
-  const updatedPages = project.pages.map((p) => p.id === pageId ? revisedPage : p);
-  const updatedProject = updateProject(projectId, {
-    pages: updatedPages,
-    status: "reviewing",
+    generatedAt: new Date(),
   });
 
   // Run validation
   const validationReq: AIRequest = {
     system: "You are a continuity validator. Review the revised content for: 1) Character consistency 2) Plot holes 3) Visual continuity 4) Timeline accuracy. Reply with APPROVED if clean, or list specific issues.",
-    user: `Revised page content:\n${revisedPage.script}\n\nOriginal feedback was: ${feedback}\n\nValidate this revision.`,
+    user: `Revised page content:\n${parsed.script || rawContent}\n\nOriginal feedback was: ${feedback}\n\nValidate this revision.`,
   };
   const validationRes = await aiMemory(validationReq);
   const validation = extractContent(validationRes);
 
+  const updatedProject = await getProject(projectId);
+
   return {
-    page: revisedPage,
+    page: {
+      id: pageId,
+      title: parsed.title || page.title,
+      number: page.number,
+      script: parsed.script || rawContent,
+      panels: (parsed.panels || page.panels).map((p: any, i: number) => ({
+        panelNumber: p.panelNumber || i + 1,
+        description: p.description || "",
+        dialogue: (p.dialogue || []).map((d: any) => ({
+          character: d.character || "",
+          text: d.text || "",
+          type: d.type || "speech",
+        })),
+        cameraAngle: p.cameraAngle || "medium-shot",
+        mood: p.mood || project.tone,
+      })),
+    },
     validation,
     project: updatedProject!,
   };
@@ -483,12 +502,12 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
 
 // ─── Approve Page ────────────────────────────────
 
-export function approveCurrentPage(projectId: string, pageId: string): ProjectData | null {
+export async function approveCurrentPage(projectId: string, pageId: string): Promise<ProjectData | null> {
   return dbApprovePage(projectId, pageId);
 }
 
 // ─── Getters ─────────────────────────────────────
 
-export function getProjectData(projectId: string): ProjectData | null {
+export async function getProjectData(projectId: string): Promise<ProjectData | null> {
   return getProject(projectId);
 }

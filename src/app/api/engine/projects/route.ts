@@ -3,11 +3,11 @@ import { getAllProjects } from "@/lib/db";
 
 /**
  * GET /api/engine/projects
- * Returns all projects from the file-based database
+ * Returns all projects from MongoDB
  */
 export async function GET() {
   try {
-    const projects = getAllProjects();
+    const projects = await getAllProjects();
     return NextResponse.json({ success: true, data: projects });
   } catch (error: any) {
     return NextResponse.json(
