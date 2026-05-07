@@ -10,6 +10,7 @@ export interface IUser extends Document {
   email: string;
   password: string;
   avatar?: string;
+  bio?: string;
   plan: "free" | "pro" | "enterprise";
   emailVerified?: Date;
   createdAt: Date;
@@ -29,6 +30,7 @@ const UserSchema = new Schema<IUser>(
     },
     password: { type: String, required: true, select: false },
     avatar: { type: String },
+    bio: { type: String, maxlength: 500, default: "" },
     plan: { type: String, enum: ["free", "pro", "enterprise"], default: "free" },
     emailVerified: { type: Date },
   },
