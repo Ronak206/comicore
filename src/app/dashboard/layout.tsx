@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   BookOpen,
@@ -17,6 +17,7 @@ import {
   Bell,
   ChevronRight,
   Zap,
+  Loader2,
 } from "lucide-react";
 
 const sidebarItems = [
@@ -28,13 +29,77 @@ const sidebarItems = [
   { icon: Settings, label: "Settings", href: "/dashboard/settings" },
 ];
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  plan: string;
+  avatar?: string;
+}
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const pathname = usePathname();
+  const router = useRouter();
+
+  // Fetch current user
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const response = await fetch("/api/auth/me");
+        const data = await response.json();
+        
+        if (data.success && data.user) {
+          setUser(data.user);
+        } else {
+          // Not authenticated, redirect to login
+          router.push("/login");
+        }
+      } catch (error) {
+        console.error("Failed to fetch user:", error);
+        router.push("/login");
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchUser();
+  }, [router]);
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
+  // Get user initials for avatar
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] flex">
@@ -69,14 +134,16 @@ export default function DashboardLayout({
           {sidebarItems.map((item) => {
             const isActive = pathname === item.href;
             return item.highlight ? (
-              <button
+              <Link
                 key={item.label}
+                href={item.href}
+                onClick={() => setSidebarOpen(false)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-sm bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide"
               >
                 <item.icon className="w-4 h-4" />
                 <span className="uppercase">{item.label}</span>
                 <ChevronRight className="w-4 h-4 ml-auto" />
-              </button>
+              </Link>
             ) : (
               <Link
                 key={item.label}
@@ -104,24 +171,28 @@ export default function DashboardLayout({
             <span className="uppercase">Help &amp; Support</span>
           </Link>
 
-          <Link
-            href="/"
-            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-[#999] tracking-wide"
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-[#999] tracking-wide hover:text-red-400 transition-colors"
           >
             <LogOut className="w-4 h-4" />
             <span className="uppercase">Log Out</span>
-          </Link>
+          </button>
         </nav>
 
-        {/* Sidebar footer */}
+        {/* Sidebar footer - User info */}
         <div className="p-4 border-t border-[#222]">
           <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 bg-[#E8B931]/20 flex items-center justify-center text-xs font-bold text-[#E8B931]">
-              <Zap className="w-4 h-4" />
+            <div className="w-8 h-8 bg-[#E8B931] flex items-center justify-center text-xs font-bold text-[#0A0A0A]">
+              {user ? getInitials(user.name) : <Zap className="w-4 h-4" />}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-[#F5F5F0] truncate">Creator</div>
-              <div className="text-xs text-[#555] truncate">comicore</div>
+              <div className="text-sm font-medium text-[#F5F5F0] truncate">
+                {user?.name || "Creator"}
+              </div>
+              <div className="text-xs text-[#555] truncate">
+                {user?.plan?.toUpperCase() || "FREE"} Plan
+              </div>
             </div>
           </div>
         </div>
@@ -168,8 +239,8 @@ export default function DashboardLayout({
                 <Bell className="w-5 h-5" />
                 <div className="absolute top-1 right-1 w-2 h-2 bg-[#E8B931]" />
               </button>
-              <div className="w-8 h-8 bg-[#E8B931]/20 flex items-center justify-center">
-                <Zap className="w-4 h-4 text-[#E8B931]" />
+              <div className="w-8 h-8 bg-[#E8B931] flex items-center justify-center text-xs font-bold text-[#0A0A0A]">
+                {user ? getInitials(user.name) : <Zap className="w-4 h-4" />}
               </div>
             </div>
           </div>
