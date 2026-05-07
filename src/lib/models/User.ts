@@ -3,6 +3,7 @@
  */
 
 import mongoose, { Schema, Document } from "mongoose";
+import bcrypt from "bcryptjs";
 
 export interface IUser extends Document {
   name: string;
@@ -39,18 +40,17 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
   const user = await mongoose.models.User.findById(this._id).select('+password');
   if (!user) return false;
   
-  const bcrypt = await import('bcryptjs');
   return bcrypt.compare(candidatePassword, user.password);
 };
 
-// Pre-save hook to hash password
-UserSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+// Pre-save hook to hash password (Mongoose 8+ async style - no next() needed)
+UserSchema.pre('save', async function() {
+  // Only hash the password if it has been modified (or is new)
+  if (!this.isModified('password')) return;
   
-  const bcrypt = await import('bcryptjs');
+  // Hash the password with a salt rounds of 12
   const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
 });
 
 export default mongoose.models.User || mongoose.model<IUser>("User", UserSchema);
