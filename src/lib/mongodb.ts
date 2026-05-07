@@ -7,11 +7,11 @@
 
 import mongoose from "mongoose";
 
-const MONGODB_URI = process.env.MONGODB_URI!;
+const MONGODB_URI = process.env.MONGODB_URI || "";
 
 if (!MONGODB_URI) {
-  throw new Error(
-    "MONGODB_URI is missing. Add it to your .env file."
+  console.warn(
+    "MONGODB_URI is missing. Add it to your .env file. Database features will not work."
   );
 }
 
