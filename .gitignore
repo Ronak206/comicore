@@ -55,4 +55,4 @@ server.log
 /skills/
 
 # File-based database
-/data/
+/data/upload/
