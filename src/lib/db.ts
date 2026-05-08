@@ -23,13 +23,10 @@ import type {
   IStoryBeat,
   IArtStyle,
   BookStatus,
-  ICharacter,
-  CharacterRole,
-  IWorld,
-  IPage,
-  IPanel,
-  PageStatus,
 } from "./models/Book";
+import type { ICharacter, CharacterRole } from "./models/Character";
+import type { IWorld } from "./models/World";
+import type { IPanel, PageStatus } from "./models/Page";
 
 // ─── Ensure Connection ──────────────────────────
 
@@ -39,6 +36,41 @@ async function db(): Promise<void> {
 
 // ─── Types (public) ─────────────────────────────
 
+// ─── Clean Data Types (no Mongoose Document fields) ────
+
+export type CharacterData = {
+  id: string;
+  bookId: string;
+  name: string;
+  role: CharacterRole;
+  description: string;
+  appearance: string;
+  personality: string;
+};
+
+export type WorldData = {
+  setting: string;
+  timePeriod: string;
+  atmosphere: string;
+  technology: string;
+  keyLocations: string;
+  rules: string;
+};
+
+export type PageData = {
+  id: string;
+  bookId: string;
+  number: number;
+  title: string;
+  status: PageStatus;
+  panels: IPanel[];
+  script: string;
+  userInstructions?: string;
+  feedback?: string;
+  generatedAt: string;
+  approvedAt?: string;
+};
+
 export type ProjectData = {
   id: string;
   title: string;
@@ -47,12 +79,12 @@ export type ProjectData = {
   tone: string;
   targetAudience: string;
   pageGoal: number;
-  characters: ICharacter[];
-  world: IWorld;
+  characters: CharacterData[];
+  world: WorldData;
   style: IArtStyle;
   storyBeats: IStoryBeat[];
   chapters: IChapter[];
-  pages: IPage[];
+  pages: PageData[];
   roughOverview: string;
   status: BookStatus;
   currentPage: number;
@@ -104,19 +136,31 @@ async function toProjectData(bookDoc: IBook): Promise<ProjectData> {
     tone: bookDoc.tone,
     targetAudience: bookDoc.targetAudience,
     pageGoal: bookDoc.pageGoal,
-    characters: characters.map((c) => ({
-      ...c,
+    characters: characters.map((c: any) => ({
       id: c._id.toString(),
       bookId: c.bookId.toString(),
+      name: c.name,
+      role: c.role,
+      description: c.description || "",
+      appearance: c.appearance || "",
+      personality: c.personality || "",
     })),
     world,
     style: bookDoc.style,
     storyBeats: bookDoc.storyBeats,
     chapters: bookDoc.chapters,
-    pages: pages.map((p) => ({
-      ...p,
+    pages: pages.map((p: any) => ({
       id: p._id.toString(),
       bookId: p.bookId.toString(),
+      number: p.number,
+      title: p.title,
+      status: p.status,
+      panels: p.panels || [],
+      script: p.script || "",
+      userInstructions: p.userInstructions,
+      feedback: p.feedback,
+      generatedAt: p.generatedAt ? new Date(p.generatedAt).toISOString() : new Date().toISOString(),
+      approvedAt: p.approvedAt ? new Date(p.approvedAt).toISOString() : undefined,
     })),
     roughOverview: bookDoc.roughOverview,
     status: bookDoc.status,
@@ -250,7 +294,7 @@ export async function addCharacter(
 export async function updateCharacter(
   projectId: string,
   charId: string,
-  updates: Partial<ICharacter>
+  updates: Partial<CharacterData>
 ): Promise<ProjectData | null> {
   await db();
 

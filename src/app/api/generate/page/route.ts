@@ -92,7 +92,14 @@ export async function POST(request: NextRequest) {
     const pageNumber = Math.floor(Math.random() * 20) + 1;
     const panelCount = body.pageInstructions?.panelCount || Math.floor(Math.random() * 4) + 3;
 
-    const panels = [];
+    const panels: Array<{
+      panelNumber: number;
+      layout: { x: number; y: number; width: number; height: number };
+      description: string;
+      dialogue: Array<{ character: string; text: string; type: string }>;
+      cameraAngle: string;
+      mood: string;
+    }> = [];
     for (let i = 0; i < panelCount; i++) {
       panels.push({
         panelNumber: i + 1,

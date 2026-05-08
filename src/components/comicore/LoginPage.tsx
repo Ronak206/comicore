@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { Zap, ArrowLeft, Eye, EyeOff } from "lucide-react";
-import type { PageView } from "@/app/page";
+
+type PageView = "landing" | "login" | "signup";
 
 interface LoginPageProps {
   onNavigate: (page: PageView) => void;

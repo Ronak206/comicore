@@ -400,18 +400,11 @@ export default function ComicWorkspacePage() {
                 />
                 <button
                   onClick={handleGeneratePage}
-                  disabled={genState === "generating"}
                   className="w-full px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
                 >
-                  {genState === "generating" ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Generating Page {approvedCount + 1}...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
-                    </>
-                  )}
+                  <>
+                    <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
+                  </>
                 </button>
               </div>
             </div>
