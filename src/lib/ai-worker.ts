@@ -15,7 +15,9 @@
 
 // ─── Config ──────────────────────────────────────
 
-const WORKER_URL = process.env.AI_WORKER_URL || "https://comicore.robin241205.workers.dev";
+const WORKER_URL = process.env.AI_WORKER_URL || "https://comicore.ai-worker.workers.dev";
+
+console.log("[AI Worker] Using worker URL:", WORKER_URL);
 
 // ─── Types ───────────────────────────────────────
 
@@ -64,24 +66,34 @@ export interface PipelineResponse {
 
 async function callWorker(endpoint: string, body: AIRequest): Promise<Response> {
   const url = `${WORKER_URL}${endpoint}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      system: body.system,
-      user: body.user,
-      history: body.history || [],
-    }),
-  });
+  console.log(`[AI Worker] Calling ${endpoint}...`, { url });
+  
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        system: body.system,
+        user: body.user,
+        history: body.history || [],
+      }),
+    });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(`AI Worker error (${res.status}): ${errorData.error || "Request failed"}`);
+    console.log(`[AI Worker] Response status for ${endpoint}:`, res.status);
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
+      console.error(`[AI Worker] Error for ${endpoint}:`, errorData);
+      throw new Error(`AI Worker error (${res.status}): ${errorData.error || "Request failed"}`);
+    }
+
+    return res;
+  } catch (error: any) {
+    console.error(`[AI Worker] Fetch failed for ${endpoint}:`, error.message);
+    throw error;
   }
-
-  return res;
 }
 
 // ─── Public API ──────────────────────────────────

@@ -17,16 +17,20 @@ import { createNewProject, addProjectCharacter, updateProjectWorld, updateProjec
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    console.log("[Setup API] Received request:", { title: body.title, synopsis: body.synopsis?.substring(0, 50) });
 
     if (!body.title?.trim()) {
+      console.error("[Setup API] Missing title");
       return NextResponse.json({ success: false, error: "Title is required." }, { status: 400 });
     }
 
     if (!body.synopsis?.trim()) {
+      console.error("[Setup API] Missing synopsis");
       return NextResponse.json({ success: false, error: "Synopsis is required." }, { status: 400 });
     }
 
     // Create project
+    console.log("[Setup API] Creating project...");
     const project = await createNewProject({
       title: body.title,
       genre: body.genre || "Sci-Fi",
@@ -35,9 +39,11 @@ export async function POST(request: NextRequest) {
       targetAudience: body.targetAudience || "Young Adult / Adult",
       pageGoal: body.pageGoal || 24,
     });
+    console.log("[Setup API] Project created with id:", project.id);
 
     // Add characters if provided
     if (body.characters && Array.isArray(body.characters)) {
+      console.log("[Setup API] Adding", body.characters.length, "characters");
       for (const char of body.characters) {
         if (char.name?.trim()) {
           await addProjectCharacter(project.id, {
@@ -53,6 +59,7 @@ export async function POST(request: NextRequest) {
 
     // Update world if provided
     if (body.world) {
+      console.log("[Setup API] Updating world");
       await updateProjectWorld(project.id, {
         setting: body.world.setting || "",
         timePeriod: body.world.timePeriod || "",
@@ -65,6 +72,7 @@ export async function POST(request: NextRequest) {
 
     // Update style if provided
     if (body.style) {
+      console.log("[Setup API] Updating style");
       await updateProjectStyle(project.id, {
         artStyle: body.style.artStyle || "noir-cyberpunk",
         colorPalette: body.style.colorPalette || "dominated-dark",
@@ -79,9 +87,11 @@ export async function POST(request: NextRequest) {
     // Re-fetch to get all updated data
     const { getProjectData } = await import("@/lib/story-engine");
     const finalProject = await getProjectData(project.id);
+    console.log("[Setup API] Returning project:", finalProject?.id);
 
     return NextResponse.json({ success: true, data: finalProject }, { status: 201 });
   } catch (error: any) {
+    console.error("[Setup API] Error:", error.message, error.stack);
     return NextResponse.json(
       { success: false, error: error.message || "Setup failed" },
       { status: 500 }

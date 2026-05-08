@@ -164,12 +164,18 @@ export default function CreateComicPage() {
   const projectIdRef = useRef<string | null>(null);
 
   const saveProject = async (): Promise<string | null> => {
+    console.log("[Frontend] saveProject called, current ref:", projectIdRef.current);
+    
     // Use ref first (always up-to-date), fall back to state
-    if (projectIdRef.current) return projectIdRef.current;
+    if (projectIdRef.current) {
+      console.log("[Frontend] Returning existing projectId from ref:", projectIdRef.current);
+      return projectIdRef.current;
+    }
 
     setLoading(true);
     setError(null);
     try {
+      console.log("[Frontend] Fetching /api/engine/setup...");
       const res = await fetch("/api/engine/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -181,13 +187,19 @@ export default function CreateComicPage() {
           style: styleForm,
         }),
       });
+      console.log("[Frontend] Setup response status:", res.status);
+      
       const data = await res.json();
+      console.log("[Frontend] Setup response data:", { success: data.success, error: data.error });
+      
       if (!data.success) throw new Error(data.error);
       const id = data.data.id;
       projectIdRef.current = id;
       setProjectId(id);
+      console.log("[Frontend] Project saved with id:", id);
       return id;
     } catch (err: any) {
+      console.error("[Frontend] Error in saveProject:", err);
       setError(err.message || "Failed to save project");
       return null;
     } finally {
@@ -197,22 +209,37 @@ export default function CreateComicPage() {
 
   // ─── Generate Overview (step 4) ────────────────
   const handleGenerateOverview = async () => {
+    console.log("[Frontend] handleGenerateOverview called");
+    
     // Always get a fresh projectId from saveProject (uses ref internally)
     const id = await saveProject();
-    if (!id) return;
+    console.log("[Frontend] saveProject returned id:", id);
+    
+    if (!id) {
+      console.error("[Frontend] No projectId, aborting overview generation");
+      setError("Failed to save project. Please try again.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
     try {
+      console.log("[Frontend] Fetching /api/engine/overview with projectId:", id);
       const res = await fetch("/api/engine/overview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: id }),
       });
+      console.log("[Frontend] Response status:", res.status);
+      
       const data = await res.json();
+      console.log("[Frontend] Response data:", { success: data.success, error: data.error });
+      
       if (!data.success) throw new Error(data.error);
       setOverview(data.data.overview);
+      console.log("[Frontend] Overview set successfully");
     } catch (err: any) {
+      console.error("[Frontend] Error in handleGenerateOverview:", err);
       setError(err.message || "Failed to generate overview");
     } finally {
       setLoading(false);

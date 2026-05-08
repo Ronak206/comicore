@@ -74,9 +74,15 @@ export async function updateProjectStyle(
 // ─── AI: Generate Rough Overview ─────────────────
 
 export async function generateOverview(projectId: string): Promise<{ overview: string; project: ProjectData }> {
+  console.log("[Story Engine] generateOverview called for project:", projectId);
+  
   const project = await getProject(projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    console.error("[Story Engine] Project not found:", projectId);
+    throw new Error("Project not found");
+  }
 
+  console.log("[Story Engine] Project found:", project.title);
   const characterSummary = project.characters
     .map((c) => `${c.name} (${c.role}): ${c.description}`)
     .join("\n");
@@ -111,8 +117,12 @@ Panel Density: ${project.style.panelDensity}
 Write a rough story overview that covers the full narrative arc.`,
   };
 
+  console.log("[Story Engine] Calling aiWrite for overview...");
   const response = await aiWrite(req);
+  console.log("[Story Engine] aiWrite response received");
+  
   const overview = extractContent(response);
+  console.log("[Story Engine] Extracted overview length:", overview?.length);
 
   const updated = await updateProject(projectId, {
     roughOverview: overview,
