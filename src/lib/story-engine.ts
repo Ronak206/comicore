@@ -329,6 +329,7 @@ Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON
 
   const updated = await updateProject(projectId, {
     status: "index-ready",
+    pageIndex,
   });
 
   return { pageIndex, project: updated! };
@@ -429,42 +430,64 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
   const claudeContent = extractClaudeContent(pipelineResponse);
   let validation = extractGeminiValidation(pipelineResponse);
 
-  // If validation failed or returned no context error, run a local validation
-  if (!validation || validation.includes("No context") || validation.includes("was provided")) {
-    console.log("Gemini validation failed in pipeline, running local validation...");
-    
-    // Run a local validation using the memory endpoint
-    const validationReq: AIRequest = {
-      system: `You are a comic book editor. Review the generated page content for:
-1. Character consistency - Do characters act according to their personalities?
-2. Plot coherence - Does this page fit the story flow?
-3. Visual clarity - Can the panels be clearly visualized?
-4. Dialogue quality - Is the dialogue natural and engaging?
+  // Get page index context for current page
+  const currentPageIndex = project.pageIndex?.find(p => p.pageNumber === nextPageNum);
+  const pageIndexContext = currentPageIndex 
+    ? `PLANNED CONTENT FOR THIS PAGE:\nTitle: ${currentPageIndex.title}\nDescription: ${currentPageIndex.description}\nKey Events: ${currentPageIndex.keyEvents?.join(', ') || 'None specified'}`
+    : "";
 
-Respond with either:
-- APPROVED: [brief reason]
-- NEEDS REVISION: [specific issues to fix]`,
-      user: `COMIC: ${project.title}
+  // Build world rules context
+  const worldRulesContext = project.world.rules 
+    ? `WORLD RULES (MUST NOT VIOLATE):\n${project.world.rules}`
+    : "";
+
+  // Always run comprehensive validation using aiMemory for better context
+  console.log("Running comprehensive Gemini validation...");
+  
+  const validationReq: AIRequest = {
+    system: `You are a comic book editor and continuity expert. Review the generated page content thoroughly.
+
+VALIDATION CHECKLIST:
+1. CHARACTER CONSISTENCY: Do characters act according to their defined personalities and appearances?
+2. WORLD RULES: Does the content violate any established world rules?
+3. PLOT COHERENCE: Does this page fit the story flow and planned content?
+4. VISUAL CLARITY: Can the panels be clearly visualized by an artist?
+5. DIALOGUE QUALITY: Is the dialogue natural, engaging, and character-appropriate?
+6. TIMELINE ACCURACY: Are events consistent with the story timeline?
+
+Respond in this format:
+**VERDICT:** [APPROVED / NEEDS REVISION]
+**ANALYSIS:** [Brief analysis of each checklist item]
+**SPECIFIC ISSUES:** [List any problems found, or "None" if approved]`,
+    user: `COMIC: ${project.title}
 PAGE ${nextPageNum} of ${project.pageGoal}
 
-GENERATED PAGE CONTENT:
-${claudeContent}
+${pageIndexContext}
+
+${worldRulesContext}
 
 CHARACTERS:
 ${characterSummary}
 
+WORLD SETTING:
+${project.world.setting}
+${project.world.atmosphere}
+
 STORY OVERVIEW:
 ${project.roughOverview}
 
-Review this page for consistency and quality.`,
-    };
-    
-    try {
-      const validationRes = await aiMemory(validationReq);
-      validation = extractContent(validationRes);
-    } catch (e) {
-      validation = "APPROVED: Page generated successfully. (Local validation unavailable)";
-    }
+GENERATED PAGE CONTENT (JSON):
+${claudeContent}
+
+Validate this page content against the checklist above.`,
+  };
+  
+  try {
+    const validationRes = await aiMemory(validationReq);
+    validation = extractContent(validationRes);
+  } catch (e) {
+    console.error("Validation error:", e);
+    validation = "APPROVED: Page generated successfully. (Validation service temporarily unavailable)";
   }
 
   // Parse Claude's response

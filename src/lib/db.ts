@@ -29,6 +29,7 @@ import type {
   IPage,
   IPanel,
   PageStatus,
+  IPageIndexItem,
 } from "./models/Book";
 
 // ─── Ensure Connection ──────────────────────────
@@ -53,6 +54,7 @@ export type ProjectData = {
   storyBeats: IStoryBeat[];
   chapters: IChapter[];
   pages: IPage[];
+  pageIndex: IPageIndexItem[];
   roughOverview: string;
   status: BookStatus;
   currentPage: number;
@@ -121,6 +123,7 @@ async function toProjectData(bookDoc: IBook): Promise<ProjectData> {
     roughOverview: bookDoc.roughOverview,
     status: bookDoc.status,
     currentPage: bookDoc.currentPage,
+    pageIndex: bookDoc.pageIndex || [],
     createdAt: bookDoc.createdAt.toISOString(),
     updatedAt: bookDoc.updatedAt.toISOString(),
   };
@@ -200,6 +203,7 @@ export async function updateProject(
     style: Partial<IArtStyle>;
     chapters: IChapter[];
     storyBeats: IStoryBeat[];
+    pageIndex: IPageIndexItem[];
   }>
 ): Promise<ProjectData | null> {
   await db();

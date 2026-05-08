@@ -27,7 +27,7 @@ import {
 
 // ─── Types ───────────────────────────────────────
 
-type WorkspaceTab = "generate" | "chapters" | "characters" | "world" | "style";
+type WorkspaceTab = "generate" | "pageIndex" | "chapters" | "characters" | "world" | "style";
 
 interface ProjectData {
   id: string;
@@ -78,6 +78,13 @@ interface ProjectData {
     description: string;
     pageRange: string;
   }>;
+  pageIndex: Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    keyEvents: string[];
+  }>;
   pages: Array<{
     id: string;
     number: number;
@@ -122,6 +129,16 @@ export default function ComicWorkspacePage() {
   const [userInstructions, setUserInstructions] = useState("");
   const [feedback, setFeedback] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
+  
+  // Page Index state
+  const [generatingIndex, setGeneratingIndex] = useState(false);
+  const [pageIndex, setPageIndex] = useState<Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    keyEvents: string[];
+  }>>([]);
 
   // Load project from API
   const loadProject = useCallback(async () => {
@@ -131,6 +148,10 @@ export default function ComicWorkspacePage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Project not found");
       setProject(data.data);
+      // Set page index from project data
+      if (data.data.pageIndex && data.data.pageIndex.length > 0) {
+        setPageIndex(data.data.pageIndex);
+      }
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -142,6 +163,35 @@ export default function ComicWorkspacePage() {
   useEffect(() => {
     loadProject();
   }, [loadProject]);
+
+  // ─── Generate Page Index ─────────────────────────
+  const handleGeneratePageIndex = async () => {
+    if (!project) return;
+    
+    setGeneratingIndex(true);
+    setError(null);
+    
+    try {
+      const res = await fetch("/api/engine/page-index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      
+      setPageIndex(data.data.pageIndex);
+      // Reload project to get updated status
+      await loadProject();
+    } catch (err: any) {
+      setError(err.message || "Failed to generate page index");
+    } finally {
+      setGeneratingIndex(false);
+    }
+  };
+
+  // Check if page index exists
+  const hasPageIndex = pageIndex && pageIndex.length > 0;
 
   // ─── Generate Page ─────────────────────────────
   const handleGeneratePage = async () => {
@@ -241,6 +291,7 @@ export default function ComicWorkspacePage() {
 
   const tabs: { key: WorkspaceTab; label: string; icon: typeof BookOpen }[] = [
     { key: "generate", label: "Generate", icon: Sparkles },
+    { key: "pageIndex", label: "Page Index", icon: BookOpen },
     { key: "chapters", label: "Chapters", icon: LayoutGrid },
     { key: "characters", label: "Characters", icon: Users },
     { key: "world", label: "World", icon: Globe },
@@ -382,38 +433,69 @@ export default function ComicWorkspacePage() {
           {/* Initial generate button */}
           {genState === "idle" && !showInstructions && (
             <div className="bg-[#111] border border-[#222] p-12 text-center">
-              <Sparkles className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
-              <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Ready to Generate</h3>
-              <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
-                Page {approvedCount + 1} of {totalPages}. The AI will write a detailed page script with panels and dialogue.
-              </p>
-              <p className="text-xs text-[#555] mb-6">
-                You can review each page, give feedback, and approve before moving to the next.
-              </p>
-              <div className="max-w-md mx-auto">
-                <textarea
-                  value={userInstructions}
-                  onChange={(e) => setUserInstructions(e.target.value)}
-                  rows={2}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none mb-3"
-                  placeholder="Optional: any specific instructions for this page..."
-                />
-                <button
-                  onClick={handleGeneratePage}
-                  disabled={genState === "generating"}
-                  className="w-full px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
-                >
-                  {genState === "generating" ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Generating Page {approvedCount + 1}...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
-                    </>
-                  )}
-                </button>
-              </div>
+              {/* Check if page index exists */}
+              {!hasPageIndex ? (
+                <>
+                  <BookOpen className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Page Index Required</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
+                    Before generating pages, you need to create a Page Index. This gives you an overview of all pages before generation.
+                  </p>
+                  <p className="text-xs text-[#555] mb-6">
+                    Claude will plan out all {totalPages} pages, then Gemini will validate the plan.
+                  </p>
+                  <button
+                    onClick={handleGeneratePageIndex}
+                    disabled={generatingIndex}
+                    className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2 mx-auto"
+                  >
+                    {generatingIndex ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" /> Generating Page Index...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" /> Generate Page Index
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Ready to Generate</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
+                    Page {approvedCount + 1} of {totalPages}. The AI will write a detailed page script with panels and dialogue.
+                  </p>
+                  <p className="text-xs text-[#555] mb-6">
+                    You can review each page, give feedback, and approve before moving to the next.
+                  </p>
+                  <div className="max-w-md mx-auto">
+                    <textarea
+                      value={userInstructions}
+                      onChange={(e) => setUserInstructions(e.target.value)}
+                      rows={2}
+                      className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none mb-3"
+                      placeholder="Optional: any specific instructions for this page..."
+                    />
+                    <button
+                      onClick={handleGeneratePage}
+                      disabled={genState === "generating"}
+                      className="w-full px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
+                    >
+                      {genState === "generating" ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" /> Generating Page {approvedCount + 1}...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -613,6 +695,97 @@ export default function ComicWorkspacePage() {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========== PAGE INDEX TAB ========== */}
+      {activeTab === "pageIndex" && project && (
+        <div className="space-y-5">
+          <div className="bg-[#111] border border-[#222] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                Page Index — Overview
+              </h3>
+              {!generatingIndex && hasPageIndex && (
+                <button
+                  onClick={handleGeneratePageIndex}
+                  className="text-xs text-[#666] tracking-wide uppercase flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Regenerate
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-[#555] mb-4">
+              This index shows all planned pages. Review it to ensure the story flow is correct before generating actual pages.
+            </p>
+
+            {generatingIndex ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-4">
+                <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+                <p className="text-sm text-[#666]">Claude is planning your page index...</p>
+              </div>
+            ) : hasPageIndex ? (
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+                {pageIndex.map((page) => (
+                  <div key={page.pageNumber} className="flex items-start gap-4 p-3 bg-[#0A0A0A] border border-[#222] hover:border-[#333] transition-colors">
+                    <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center flex-shrink-0">
+                      {page.pageNumber}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-[#F5F5F0] truncate">{page.title}</span>
+                        <span className="text-[10px] text-[#555] border border-[#333] px-2 py-0.5 flex-shrink-0">
+                          {page.chapter}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#666] mt-1 leading-relaxed">{page.description}</p>
+                      {page.keyEvents && page.keyEvents.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {page.keyEvents.map((event, i) => (
+                            <span key={i} className="text-[10px] text-[#E8B931]/70 bg-[#E8B931]/5 px-1.5 py-0.5 border border-[#E8B931]/20">
+                              {event}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <BookOpen className="w-10 h-10 text-[#333] mx-auto mb-4" />
+                <p className="text-sm text-[#555]">No page index generated yet.</p>
+                <button
+                  onClick={handleGeneratePageIndex}
+                  className="mt-4 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2 mx-auto"
+                >
+                  <Sparkles className="w-4 h-4" /> Generate Page Index
+                </button>
+              </div>
+            )}
+          </div>
+
+          {hasPageIndex && (
+            <div className="bg-[#111] border border-[#222] p-5">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-3">Summary</h3>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{pageIndex.length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Total Pages</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{project.characters.length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Characters</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#E8B931]">{project.genre.split("-")[0]}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Genre</div>
+                </div>
               </div>
             </div>
           )}
