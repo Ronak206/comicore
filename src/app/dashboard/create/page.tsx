@@ -24,7 +24,7 @@ import {
 
 // ─── Types ───────────────────────────────────────
 
-type WizardStep = "story" | "characters" | "world" | "style" | "overview" | "chapters";
+type WizardStep = "story" | "characters" | "world" | "style" | "overview" | "chapters" | "pageIndex";
 
 interface Character {
   name: string;
@@ -43,6 +43,7 @@ const steps: { key: WizardStep; label: string; icon: typeof BookOpen }[] = [
   { key: "style", label: "Art Style", icon: Palette },
   { key: "overview", label: "Overview", icon: Eye },
   { key: "chapters", label: "Chapters", icon: LayoutGrid },
+  { key: "pageIndex", label: "Page Index", icon: BookOpen },
 ];
 
 export default function CreateComicPage() {
@@ -115,6 +116,13 @@ export default function CreateComicPage() {
     description: string;
     pageRange: string;
   }>>([]);
+  const [pageIndex, setPageIndex] = useState<Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    keyEvents: string[];
+  }>>([]);
 
   // ─── Navigation ────────────────────────────────
   const stepIndex = steps.findIndex((s) => s.key === currentStep);
@@ -132,6 +140,8 @@ export default function CreateComicPage() {
         return overview.length > 0;
       case "chapters":
         return chapters.length > 0;
+      case "pageIndex":
+        return pageIndex.length > 0;
       default:
         return false;
     }
@@ -232,6 +242,29 @@ export default function CreateComicPage() {
     }
   };
 
+  // ─── Generate Page Index (step 6) ────────────────
+  const handleGeneratePageIndex = async () => {
+    const id = projectIdRef.current;
+    if (!id) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/engine/page-index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setPageIndex(data.data.pageIndex);
+    } catch (err: any) {
+      setError(err.message || "Failed to generate page index");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ─── Start Building (finish) ──────────────────
   const handleStartBuilding = () => {
     const id = projectIdRef.current || projectId;
@@ -254,6 +287,10 @@ export default function CreateComicPage() {
       setCurrentStep("chapters");
       // Auto-generate chapters
       handleGenerateChapters();
+    } else if (currentStep === "chapters" && chapters.length > 0) {
+      setCurrentStep("pageIndex");
+      // Auto-generate page index
+      handleGeneratePageIndex();
     } else {
       goNext();
     }
@@ -290,7 +327,7 @@ export default function CreateComicPage() {
             key={step.key}
             onClick={() => {
               // Can only go to steps we've passed or current
-              if (i <= stepIndex || (step.key === "overview" && projectId) || (step.key === "chapters" && overview)) {
+              if (i <= stepIndex || (step.key === "overview" && projectId) || (step.key === "chapters" && overview) || (step.key === "pageIndex" && chapters.length > 0)) {
                 setCurrentStep(step.key);
               }
             }}
@@ -834,6 +871,101 @@ export default function CreateComicPage() {
         </div>
       )}
 
+      {/* ========== PAGE INDEX STEP ========== */}
+      {currentStep === "pageIndex" && (
+        <div className="max-w-4xl space-y-5">
+          <div className="bg-[#111] border border-[#222] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                Page Index — Review &amp; Approve
+              </h3>
+              {!loading && pageIndex.length > 0 && (
+                <button
+                  onClick={handleGeneratePageIndex}
+                  className="text-xs text-[#666] tracking-wide uppercase flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Regenerate
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-[#555] mb-4">
+              Review the planned page-by-page breakdown below. Once approved, click &quot;Start Building&quot; to begin generating actual pages.
+            </p>
+
+            {loading && pageIndex.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-4">
+                <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+                <p className="text-sm text-[#666]">Claude is planning your page index...</p>
+              </div>
+            ) : pageIndex.length > 0 ? (
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
+                {pageIndex.map((page) => (
+                  <div key={page.pageNumber} className="flex items-start gap-4 p-3 bg-[#0A0A0A] border border-[#222] hover:border-[#333] transition-colors">
+                    <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center flex-shrink-0">
+                      {page.pageNumber}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-[#F5F5F0] truncate">{page.title}</span>
+                        <span className="text-[10px] text-[#555] border border-[#333] px-2 py-0.5 flex-shrink-0">
+                          {page.chapter}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#666] mt-1 leading-relaxed">{page.description}</p>
+                      {page.keyEvents && page.keyEvents.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {page.keyEvents.map((event, i) => (
+                            <span key={i} className="text-[10px] text-[#E8B931]/70 bg-[#E8B931]/5 px-1.5 py-0.5 border border-[#E8B931]/20">
+                              {event}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-sm text-[#555]">Click &quot;Generate Index&quot; to create a page-by-page breakdown.</p>
+                <button
+                  onClick={handleGeneratePageIndex}
+                  className="mt-4 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2 mx-auto"
+                >
+                  <Sparkles className="w-4 h-4" /> Generate Page Index
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Summary */}
+          {pageIndex.length > 0 && (
+            <div className="bg-[#111] border border-[#222] p-5">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-3">Summary</h3>
+              <div className="grid grid-cols-4 gap-4 text-center">
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{pageIndex.length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Total Pages</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{chapters.length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Chapters</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{characters.filter((c) => c.name.trim()).length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Characters</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#E8B931]">{storyForm.genre.split("-")[0]}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Genre</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ========== Navigation Buttons ========== */}
       <div className="flex items-center justify-between pt-4 border-t border-[#222]">
         <button
@@ -846,7 +978,7 @@ export default function CreateComicPage() {
           <ArrowLeft className="w-3.5 h-3.5" /> Back
         </button>
 
-        {currentStep === "chapters" && chapters.length > 0 ? (
+        {currentStep === "pageIndex" && pageIndex.length > 0 ? (
           <button
             onClick={handleStartBuilding}
             className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2"
@@ -867,7 +999,7 @@ export default function CreateComicPage() {
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <>
-                {currentStep === "style" || currentStep === "overview" ? (
+                {currentStep === "style" || currentStep === "overview" || currentStep === "chapters" ? (
                   <>
                     <Sparkles className="w-3.5 h-3.5" /> Generate &amp; Next
                   </>

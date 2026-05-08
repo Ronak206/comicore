@@ -221,6 +221,114 @@ Break this into chapters and story beats. Return ONLY JSON.`,
   return { chapters, storyBeats, project: updated! };
 }
 
+// ─── AI: Generate Page Index ───────────────────────
+
+export async function generatePageIndex(projectId: string): Promise<{
+  pageIndex: Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    keyEvents: string[];
+  }>;
+  project: ProjectData;
+}> {
+  const project = await getProject(projectId);
+  if (!project) throw new Error("Project not found");
+
+  const characterSummary = project.characters
+    .map((c) => `${c.name} (${c.role})`)
+    .join(", ");
+
+  const chapterSummary = project.chapters
+    .map((ch) => `Chapter ${ch.number}: "${ch.title}" (Pages ${ch.pageRange}) - ${ch.description}`)
+    .join("\n");
+
+  const req: AIRequest = {
+    system: `You are a comic story planner. Create a detailed page-by-page index for a ${project.pageGoal}-page comic.
+This index will be shown to the user for approval before generating the actual pages.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "pageIndex": [
+    {
+      "pageNumber": 1,
+      "title": "Page Title",
+      "description": "Brief description of what happens on this page",
+      "chapter": "Chapter 1",
+      "keyEvents": ["Event 1", "Event 2"]
+    }
+  ]
+}
+
+Important rules:
+- Create exactly ${project.pageGoal} pages
+- Each page should have a unique title and description
+- Map pages to their respective chapters
+- Include 1-3 key events per page
+- Ensure story flows logically from beginning to end`,
+    user: `COMIC: ${project.title}
+GENRE: ${project.genre}
+TONE: ${project.tone}
+TOTAL PAGES: ${project.pageGoal}
+
+CHARACTERS:
+${characterSummary || "No characters defined"}
+
+STORY OVERVIEW:
+${project.roughOverview}
+
+CHAPTER BREAKDOWN:
+${chapterSummary}
+
+Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON.`,
+  };
+
+  const response = await aiThink(req);
+  let rawContent = extractContent(response);
+
+  // Strip markdown code fences if present
+  rawContent = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error("Failed to parse page index from AI response");
+    }
+  }
+
+  const pageIndex = (parsed.pageIndex || []).map((p: any, i: number) => ({
+    pageNumber: p.pageNumber || i + 1,
+    title: p.title || `Page ${i + 1}`,
+    description: p.description || "Story continues...",
+    chapter: p.chapter || "Main",
+    keyEvents: p.keyEvents || [],
+  }));
+
+  // Ensure we have exactly pageGoal pages
+  while (pageIndex.length < project.pageGoal) {
+    const num = pageIndex.length + 1;
+    pageIndex.push({
+      pageNumber: num,
+      title: `Page ${num}`,
+      description: "Story continues...",
+      chapter: "Main",
+      keyEvents: [],
+    });
+  }
+
+  const updated = await updateProject(projectId, {
+    status: "index-ready",
+  });
+
+  return { pageIndex, project: updated! };
+}
+
 // ─── AI: Generate Page ───────────────────────────
 
 export async function generateNextPage(
@@ -340,21 +448,35 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
     }
   }
 
+  // Ensure all panels have valid descriptions (required by MongoDB schema)
+  const panels = (parsed.panels || []).map((p: any, i: number) => ({
+    panelNumber: p.panelNumber || i + 1,
+    description: p.description && p.description.trim() ? p.description.trim() : `Panel ${i + 1} - ${p.mood || project.tone || 'action'} scene`,
+    dialogue: (p.dialogue || []).map((d: any) => ({
+      character: d.character || "",
+      text: d.text || "",
+      type: d.type || "speech",
+    })),
+    cameraAngle: p.cameraAngle || "medium-shot",
+    mood: p.mood || project.tone || "tense",
+  }));
+
+  // If no panels were generated, create at least one panel
+  if (panels.length === 0) {
+    panels.push({
+      panelNumber: 1,
+      description: `Scene depicting: ${claudeContent.substring(0, 100)}...`,
+      dialogue: [],
+      cameraAngle: "medium-shot",
+      mood: project.tone || "tense",
+    });
+  }
+
   const pageData = {
     number: nextPageNum,
     title: parsed.title || `Page ${nextPageNum}`,
     status: "in-review" as const,
-    panels: (parsed.panels || []).map((p: any, i: number) => ({
-      panelNumber: p.panelNumber || i + 1,
-      description: p.description || "",
-      dialogue: (p.dialogue || []).map((d: any) => ({
-        character: d.character || "",
-        text: d.text || "",
-        type: d.type || "speech",
-      })),
-      cameraAngle: p.cameraAngle || "medium-shot",
-      mood: p.mood || project.tone,
-    })),
+    panels,
     script: parsed.script || claudeContent,
     userInstructions,
   };
@@ -446,22 +568,25 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
     }
   }
 
+  // Ensure all panels have valid descriptions (required by MongoDB schema)
+  const revisedPanels = (parsed.panels || page.panels).map((p: any, i: number) => ({
+    panelNumber: p.panelNumber || i + 1,
+    description: p.description && p.description.trim() ? p.description.trim() : `Panel ${i + 1} - revised scene`,
+    dialogue: (p.dialogue || []).map((d: any) => ({
+      character: d.character || "",
+      text: d.text || "",
+      type: d.type || "speech",
+    })),
+    cameraAngle: p.cameraAngle || "medium-shot",
+    mood: p.mood || project.tone || "tense",
+  }));
+
   // Update the page in MongoDB
   const PageModel = (await import("./models/Page")).default;
   await PageModel.findByIdAndUpdate(pageId, {
     title: parsed.title || page.title,
     script: parsed.script || rawContent,
-    panels: (parsed.panels || page.panels).map((p: any, i: number) => ({
-      panelNumber: p.panelNumber || i + 1,
-      description: p.description || "",
-      dialogue: (p.dialogue || []).map((d: any) => ({
-        character: d.character || "",
-        text: d.text || "",
-        type: d.type || "speech",
-      })),
-      cameraAngle: p.cameraAngle || "medium-shot",
-      mood: p.mood || project.tone,
-    })),
+    panels: revisedPanels,
     status: "in-review",
     feedback,
     generatedAt: new Date(),
@@ -483,17 +608,7 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
       title: parsed.title || page.title,
       number: page.number,
       script: parsed.script || rawContent,
-      panels: (parsed.panels || page.panels).map((p: any, i: number) => ({
-        panelNumber: p.panelNumber || i + 1,
-        description: p.description || "",
-        dialogue: (p.dialogue || []).map((d: any) => ({
-          character: d.character || "",
-          text: d.text || "",
-          type: d.type || "speech",
-        })),
-        cameraAngle: p.cameraAngle || "medium-shot",
-        mood: p.mood || project.tone,
-      })),
+      panels: revisedPanels,
     },
     validation,
     project: updatedProject!,

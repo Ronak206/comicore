@@ -1,11 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Menu, X, Zap } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Menu, X, Zap, LogOut, User } from "lucide-react";
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const response = await fetch("/api/auth/me");
+        const data = await response.json();
+        if (data.success && data.user) {
+          setIsAuthenticated(true);
+          setUser(data.user);
+        } else {
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      } catch (error) {
+        setIsAuthenticated(false);
+        setUser(null);
+      }
+    }
+    checkAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      setIsAuthenticated(false);
+      setUser(null);
+      router.push("/");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-[#0A0A0A]/90 backdrop-blur-md border-b border-[#222]">
@@ -53,18 +88,39 @@ export function Navbar() {
 
         {/* Auth Buttons */}
         <div className="hidden md:flex items-center gap-3">
-          <Link
-            href="/login"
-            className="px-5 py-2 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase"
-          >
-            Log In
-          </Link>
-          <Link
-            href="/signup"
-            className="px-5 py-2 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase"
-          >
-            Sign Up
-          </Link>
+          {isAuthenticated ? (
+            <>
+              <Link
+                href="/dashboard"
+                className="px-5 py-2 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase flex items-center gap-2"
+              >
+                <User className="w-4 h-4" />
+                Dashboard
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="px-5 py-2 text-sm text-[#999] tracking-wide uppercase flex items-center gap-2 hover:text-red-400 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Log Out
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="px-5 py-2 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase"
+              >
+                Log In
+              </Link>
+              <Link
+                href="/signup"
+                className="px-5 py-2 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase"
+              >
+                Sign Up
+              </Link>
+            </>
+          )}
         </div>
 
         {/* Mobile Menu Toggle */}
@@ -90,20 +146,45 @@ export function Navbar() {
             </a>
           ))}
           <div className="border-t border-[#222] pt-4 flex flex-col gap-3">
-            <Link
-              href="/login"
-              onClick={() => setMobileOpen(false)}
-              className="w-full px-5 py-3 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase text-center"
-            >
-              Log In
-            </Link>
-            <Link
-              href="/signup"
-              onClick={() => setMobileOpen(false)}
-              className="w-full px-5 py-3 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase text-center"
-            >
-              Sign Up
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileOpen(false)}
+                  className="w-full px-5 py-3 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase text-center flex items-center justify-center gap-2"
+                >
+                  <User className="w-4 h-4" />
+                  Dashboard
+                </Link>
+                <button
+                  onClick={() => {
+                    setMobileOpen(false);
+                    handleLogout();
+                  }}
+                  className="w-full px-5 py-3 text-sm text-[#999] tracking-wide uppercase text-center flex items-center justify-center gap-2 hover:text-red-400 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Log Out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  onClick={() => setMobileOpen(false)}
+                  className="w-full px-5 py-3 text-sm text-[#F5F5F0] border border-[#333] tracking-wide uppercase text-center"
+                >
+                  Log In
+                </Link>
+                <Link
+                  href="/signup"
+                  onClick={() => setMobileOpen(false)}
+                  className="w-full px-5 py-3 text-sm bg-[#E8B931] text-[#0A0A0A] font-semibold tracking-wide uppercase text-center"
+                >
+                  Sign Up
+                </Link>
+              </>
+            )}
           </div>
         </div>
       )}
