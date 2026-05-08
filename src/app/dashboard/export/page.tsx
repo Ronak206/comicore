@@ -1,80 +1,41 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   Download,
   FileText,
   Archive,
-  ChevronRight,
   CheckCircle2,
-  Clock,
-  RefreshCw,
-  Settings2,
   Image,
   Loader2,
+  AlertTriangle,
+  ArrowLeft,
 } from "lucide-react";
 
 type ExportTab = "new" | "history" | "formats";
 
-const comics = [
-  { title: "The Last Cyberpunk", pages: 24, status: "Ready", size: "18.4 MB" },
-  { title: "Shadow Walker Chronicles", pages: 18, status: "Ready", size: "13.2 MB" },
-  { title: "Neon Dreams", pages: 8, status: "Draft", size: "5.1 MB" },
-  { title: "Dark Horizon", pages: 32, status: "Ready", size: "24.6 MB" },
-  { title: "Iron Legacy", pages: 16, status: "Ready", size: "11.8 MB" },
-  { title: "Void Runners", pages: 12, status: "Ready", size: "8.9 MB" },
-];
+interface Project {
+  id: string;
+  title: string;
+  genre: string;
+  status: string;
+  pages: number;
+  totalPages: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
-const exportHistory = [
-  {
-    comic: "Iron Legacy",
-    format: "PDF",
-    pages: 16,
-    size: "11.8 MB",
-    date: "2 days ago",
-    status: "completed",
-  },
-  {
-    comic: "Dark Horizon",
-    format: "CBZ",
-    pages: 32,
-    size: "24.6 MB",
-    date: "3 days ago",
-    status: "completed",
-  },
-  {
-    comic: "Dark Horizon",
-    format: "PDF",
-    pages: 32,
-    size: "22.1 MB",
-    date: "3 days ago",
-    status: "completed",
-  },
-  {
-    comic: "The Last Cyberpunk",
-    format: "PDF",
-    pages: 20,
-    size: "15.3 MB",
-    date: "1 week ago",
-    status: "completed",
-  },
-  {
-    comic: "Shadow Walker Chronicles",
-    format: "CBZ",
-    pages: 18,
-    size: "13.2 MB",
-    date: "1 week ago",
-    status: "completed",
-  },
-  {
-    comic: "Void Runners",
-    format: "PDF",
-    pages: 12,
-    size: "8.9 MB",
-    date: "2 weeks ago",
-    status: "completed",
-  },
-];
+interface ExportRecord {
+  id: string;
+  projectId: string;
+  comicTitle: string;
+  format: string;
+  pages: number;
+  size: string;
+  date: string;
+  status: string;
+}
 
 const exportFormats = [
   {
@@ -108,20 +69,123 @@ const exportFormats = [
 
 export default function ExportPage() {
   const [activeTab, setActiveTab] = useState<ExportTab>("new");
-  const [selectedComic, setSelectedComic] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [exportHistory, setExportHistory] = useState<ExportRecord[]>([]);
 
-  const handleExport = () => {
-    if (!selectedComic || !selectedFormat) return;
+  // Fetch projects from database
+  const fetchProjects = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/engine/projects");
+      const data = await res.json();
+      
+      if (data.success) {
+        setProjects(data.data || []);
+      } else {
+        setError(data.error || "Failed to load projects");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to load projects");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  // Handle export
+  const handleExport = async () => {
+    if (!selectedProject || !selectedFormat) return;
+    
     setExporting(true);
-    setTimeout(() => setExporting(false), 3000);
+    setError(null);
+
+    try {
+      let endpoint = "/api/export/pdf";
+      if (selectedFormat === "cbz") {
+        endpoint = "/api/export/cbz";
+      } else if (selectedFormat === "images") {
+        endpoint = "/api/export/images";
+      }
+      
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: selectedProject.id,
+          options: {
+            title: selectedProject.title,
+            metadata: {
+              title: selectedProject.title,
+              author: "Comicore AI",
+            },
+          },
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        // Add to export history
+        const newExport: ExportRecord = {
+          id: `export_${Date.now()}`,
+          projectId: selectedProject.id,
+          comicTitle: selectedProject.title,
+          format: selectedFormat.toUpperCase(),
+          pages: selectedProject.pages,
+          size: data.data.estimatedSize || "Calculating...",
+          date: "Just now",
+          status: "completed",
+        };
+        setExportHistory((prev) => [newExport, ...prev]);
+        
+        // In production, trigger download
+        if (data.data.downloadUrl) {
+          window.open(data.data.downloadUrl, "_blank");
+        }
+      } else {
+        setError(data.error || "Export failed");
+      }
+    } catch (err: any) {
+      setError(err.message || "Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const readyComics = comics.filter((c) => c.status === "Ready");
+  // Get ready comics (completed or has approved pages)
+  const readyProjects = projects.filter((p) => p.status === "complete" || p.pages > 0);
+
+  // Stats
+  const totalExports = exportHistory.length;
+  const readyCount = readyProjects.length;
+  const totalPages = projects.reduce((sum, p) => sum + p.pages, 0);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-xs text-[#666] tracking-wide">
+        <Link href="/dashboard" className="uppercase flex items-center gap-1">
+          <ArrowLeft className="w-3 h-3" />
+          Dashboard
+        </Link>
+      </div>
+
       {/* Page header */}
       <div className="space-y-1">
         <h2 className="text-2xl font-black text-[#F5F5F0] tracking-tight">
@@ -132,22 +196,31 @@ export default function ExportPage() {
         </p>
       </div>
 
+      {/* Error */}
+      {error && (
+        <div className="bg-red-950/30 border border-red-900/40 p-4 text-sm text-red-400 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {error}
+          <button onClick={() => setError(null)} className="ml-auto text-red-500">✕</button>
+        </div>
+      )}
+
       {/* Export stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-[#111] border border-[#222] p-4">
           <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Exports</div>
-          <div className="text-2xl font-black text-[#E8B931]">8</div>
+          <div className="text-2xl font-black text-[#E8B931]">{totalExports}</div>
           <div className="text-xs text-[#555]">All time</div>
         </div>
         <div className="bg-[#111] border border-[#222] p-4">
           <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Ready Comics</div>
-          <div className="text-2xl font-black text-[#E8B931]">5</div>
+          <div className="text-2xl font-black text-[#E8B931]">{readyCount}</div>
           <div className="text-xs text-[#555]">Available now</div>
         </div>
         <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Storage Used</div>
-          <div className="text-2xl font-black text-[#E8B931]">82 MB</div>
-          <div className="text-xs text-[#555]">Of 1 GB</div>
+          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Pages</div>
+          <div className="text-2xl font-black text-[#E8B931]">{totalPages}</div>
+          <div className="text-xs text-[#555]">Across all projects</div>
         </div>
         <div className="bg-[#111] border border-[#222] p-4">
           <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Formats</div>
@@ -186,25 +259,39 @@ export default function ExportPage() {
               Step 1
             </h3>
             <h4 className="text-sm font-bold text-[#F5F5F0] mb-4">Select Comic</h4>
-            <div className="space-y-2">
-              {readyComics.map((comic) => (
-                <button
-                  key={comic.title}
-                  onClick={() => setSelectedComic(comic.title)}
-                  className={`w-full text-left p-3 border transition-colors ${
-                    selectedComic === comic.title
-                      ? "border-[#E8B931] bg-[#E8B931]/5"
-                      : "border-[#222] bg-[#0A0A0A]"
-                  }`}
+            
+            {readyProjects.length > 0 ? (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {readyProjects.map((project) => (
+                  <button
+                    key={project.id}
+                    onClick={() => setSelectedProject(project)}
+                    className={`w-full text-left p-3 border transition-colors ${
+                      selectedProject?.id === project.id
+                        ? "border-[#E8B931] bg-[#E8B931]/5"
+                        : "border-[#222] bg-[#0A0A0A] hover:border-[#333]"
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-[#F5F5F0]">{project.title}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] text-[#666]">{project.pages} / {project.totalPages} pages</span>
+                      <span className="text-[10px] text-[#555] border border-[#333] px-1">{project.status}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Download className="w-8 h-8 text-[#333] mx-auto mb-3" />
+                <p className="text-sm text-[#555]">No comics ready for export.</p>
+                <Link
+                  href="/dashboard/create"
+                  className="mt-4 inline-block px-4 py-2 text-xs bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase"
                 >
-                  <div className="text-sm font-medium text-[#F5F5F0]">{comic.title}</div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-[#666]">{comic.pages} pages</span>
-                    <span className="text-[10px] text-[#555]">{comic.size}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
+                  Create Your First Comic
+                </Link>
+              </div>
+            )}
           </div>
 
           {/* Step 2: Select format */}
@@ -218,10 +305,13 @@ export default function ExportPage() {
                 <button
                   key={format.id}
                   onClick={() => setSelectedFormat(format.id)}
+                  disabled={!selectedProject}
                   className={`w-full text-left p-3 border transition-colors ${
                     selectedFormat === format.id
                       ? "border-[#E8B931] bg-[#E8B931]/5"
-                      : "border-[#222] bg-[#0A0A0A]"
+                      : selectedProject
+                      ? "border-[#222] bg-[#0A0A0A] hover:border-[#333]"
+                      : "border-[#222] bg-[#0A0A0A] opacity-50 cursor-not-allowed"
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -242,13 +332,13 @@ export default function ExportPage() {
             </h3>
             <h4 className="text-sm font-bold text-[#F5F5F0] mb-4">Export</h4>
 
-            {selectedComic && selectedFormat ? (
+            {selectedProject && selectedFormat ? (
               <div className="space-y-4">
                 {/* Summary */}
                 <div className="bg-[#0A0A0A] border border-[#222] p-4 space-y-3">
                   <div className="flex justify-between">
                     <span className="text-xs text-[#666] uppercase tracking-wider">Comic</span>
-                    <span className="text-xs text-[#F5F5F0] font-medium">{selectedComic}</span>
+                    <span className="text-xs text-[#F5F5F0] font-medium">{selectedProject.title}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-xs text-[#666] uppercase tracking-wider">Format</span>
@@ -258,15 +348,11 @@ export default function ExportPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-xs text-[#666] uppercase tracking-wider">Pages</span>
-                    <span className="text-xs text-[#F5F5F0] font-medium">
-                      {readyComics.find((c) => c.title === selectedComic)?.pages}
-                    </span>
+                    <span className="text-xs text-[#F5F5F0] font-medium">{selectedProject.pages}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-xs text-[#666] uppercase tracking-wider">Est. Size</span>
-                    <span className="text-xs text-[#F5F5F0] font-medium">
-                      {readyComics.find((c) => c.title === selectedComic)?.size}
-                    </span>
+                    <span className="text-xs text-[#666] uppercase tracking-wider">Status</span>
+                    <span className="text-xs text-[#E8B931] font-medium">{selectedProject.status}</span>
                   </div>
                 </div>
 
@@ -309,8 +395,18 @@ export default function ExportPage() {
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Download className="w-10 h-10 text-[#333] mb-4" />
                 <p className="text-sm text-[#555]">
-                  Select a comic and format to start exporting.
+                  {projects.length === 0 
+                    ? "Create a comic first to enable export."
+                    : "Select a comic and format to start exporting."}
                 </p>
+                {projects.length === 0 && (
+                  <Link
+                    href="/dashboard/create"
+                    className="mt-4 px-4 py-2 text-xs bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase"
+                  >
+                    Create Comic
+                  </Link>
+                )}
               </div>
             )}
           </div>
@@ -319,36 +415,46 @@ export default function ExportPage() {
 
       {activeTab === "history" && (
         <div className="bg-[#111] border border-[#222] overflow-hidden">
-          {/* Table header */}
-          <div className="grid grid-cols-5 gap-4 px-6 py-3 border-b border-[#222]">
-            <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Comic</span>
-            <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Format</span>
-            <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Size</span>
-            <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Date</span>
-            <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase text-right">Action</span>
-          </div>
-          {/* Rows */}
-          {exportHistory.map((item, i) => (
-            <div key={i} className="grid grid-cols-5 gap-4 px-6 py-4 border-b border-[#222]/50 items-center">
-              <div>
-                <div className="text-sm text-[#F5F5F0]">{item.comic}</div>
-                <div className="text-[10px] text-[#555]">{item.pages} pages</div>
+          {exportHistory.length > 0 ? (
+            <>
+              {/* Table header */}
+              <div className="grid grid-cols-5 gap-4 px-6 py-3 border-b border-[#222]">
+                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Comic</span>
+                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Format</span>
+                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Size</span>
+                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Date</span>
+                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase text-right">Action</span>
               </div>
-              <div>
-                <span className="text-[10px] tracking-widest uppercase border border-[#E8B931]/30 text-[#E8B931] px-2 py-0.5">
-                  {item.format}
-                </span>
-              </div>
-              <div className="text-xs text-[#666]">{item.size}</div>
-              <div className="text-xs text-[#555]">{item.date}</div>
-              <div className="flex justify-end">
-                <button className="flex items-center gap-1 text-xs text-[#E8B931] tracking-wide uppercase">
-                  <Download className="w-3 h-3" />
-                  Re-download
-                </button>
-              </div>
+              {/* Rows */}
+              {exportHistory.map((item) => (
+                <div key={item.id} className="grid grid-cols-5 gap-4 px-6 py-4 border-b border-[#222]/50 items-center">
+                  <div>
+                    <div className="text-sm text-[#F5F5F0]">{item.comicTitle}</div>
+                    <div className="text-[10px] text-[#555]">{item.pages} pages</div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] tracking-widest uppercase border border-[#E8B931]/30 text-[#E8B931] px-2 py-0.5">
+                      {item.format}
+                    </span>
+                  </div>
+                  <div className="text-xs text-[#666]">{item.size}</div>
+                  <div className="text-xs text-[#555]">{item.date}</div>
+                  <div className="flex justify-end">
+                    <button className="flex items-center gap-1 text-xs text-[#E8B931] tracking-wide uppercase">
+                      <Download className="w-3 h-3" />
+                      Re-download
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <Download className="w-10 h-10 text-[#333] mx-auto mb-4" />
+              <p className="text-sm text-[#555]">No export history yet.</p>
+              <p className="text-xs text-[#444] mt-1">Your exported comics will appear here.</p>
             </div>
-          ))}
+          )}
         </div>
       )}
 

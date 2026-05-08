@@ -2,23 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db";
 
 /**
- * POST /api/export/pdf
+ * POST /api/export/images
  *
- * Exports a comic project as PDF
+ * Exports a comic project as PNG sequence (ZIP archive)
  *
  * Request Body:
  * {
  *   "sessionId": string,        // Project ID (required)
- *   "options": {                // Optional PDF settings
- *     "title": string,
- *     "pageSize": "a4" | "letter" | "comic",
- *     "orientation": "portrait" | "landscape",
- *     "includeCover": boolean,
- *     "quality": "web" | "print" | "high",
- *     "metadata": {
- *       "author": string,
- *       "publisher": string
- *     }
+ *   "options": {                // Optional settings
+ *     "resolution": "original" | "1080p" | "1440p" | "2160p",
+ *     "transparentBg": boolean,
+ *     "namingPattern": "page_001" | "p001" | "chapter_page",
+ *     "dpi": number             // 72, 150, 300
  *   }
  * }
  */
@@ -53,20 +48,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const title = body.options?.title || project.title;
+    const title = project.title;
     
-    // Calculate estimated size based on pages
-    const estimatedSizeMB = Math.round(approvedPages.length * 0.8 * 10) / 10;
+    // Calculate estimated size (PNG is largest)
+    const estimatedSizeMB = Math.round(approvedPages.length * 2.5 * 10) / 10;
 
-    // In production, this would generate an actual PDF
-    // For now, return the export details
+    // In production, this would generate actual PNG files in a ZIP
     
     return NextResponse.json({
       success: true,
-      message: "PDF export ready.",
+      message: "PNG sequence export ready.",
       data: {
-        format: "pdf",
-        filename: `${title.replace(/\s+/g, "-").toLowerCase()}.pdf`,
+        format: "images",
+        filename: `${title.replace(/\s+/g, "-").toLowerCase()}-images.zip`,
         projectId: project.id,
         title: project.title,
         genre: project.genre,
@@ -74,17 +68,17 @@ export async function POST(request: NextRequest) {
         total_pages: project.pageGoal,
         status: "ready",
         options: {
-          pageSize: body.options?.pageSize || "comic",
-          orientation: body.options?.orientation || "portrait",
-          includeCover: body.options?.includeCover ?? true,
-          quality: body.options?.quality || "web",
+          resolution: body.options?.resolution || "original",
+          transparentBg: body.options?.transparentBg ?? false,
+          namingPattern: body.options?.namingPattern || "page_001",
+          dpi: body.options?.dpi || 300,
         },
         estimatedSize: `${estimatedSizeMB} MB`,
-        downloadUrl: `/api/export/pdf/download/${project.id}`,
+        downloadUrl: `/api/export/images/download/${project.id}`,
       },
     });
   } catch (error: any) {
-    console.error("PDF export error:", error);
+    console.error("Images export error:", error);
     return NextResponse.json(
       { success: false, error: error.message || "Export failed." },
       { status: 500 }
