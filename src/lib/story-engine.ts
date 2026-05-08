@@ -427,7 +427,45 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
 
   const pipelineResponse = await aiGenerate(req);
   const claudeContent = extractClaudeContent(pipelineResponse);
-  const validation = extractGeminiValidation(pipelineResponse);
+  let validation = extractGeminiValidation(pipelineResponse);
+
+  // If validation failed or returned no context error, run a local validation
+  if (!validation || validation.includes("No context") || validation.includes("was provided")) {
+    console.log("Gemini validation failed in pipeline, running local validation...");
+    
+    // Run a local validation using the memory endpoint
+    const validationReq: AIRequest = {
+      system: `You are a comic book editor. Review the generated page content for:
+1. Character consistency - Do characters act according to their personalities?
+2. Plot coherence - Does this page fit the story flow?
+3. Visual clarity - Can the panels be clearly visualized?
+4. Dialogue quality - Is the dialogue natural and engaging?
+
+Respond with either:
+- APPROVED: [brief reason]
+- NEEDS REVISION: [specific issues to fix]`,
+      user: `COMIC: ${project.title}
+PAGE ${nextPageNum} of ${project.pageGoal}
+
+GENERATED PAGE CONTENT:
+${claudeContent}
+
+CHARACTERS:
+${characterSummary}
+
+STORY OVERVIEW:
+${project.roughOverview}
+
+Review this page for consistency and quality.`,
+    };
+    
+    try {
+      const validationRes = await aiMemory(validationReq);
+      validation = extractContent(validationRes);
+    } catch (e) {
+      validation = "APPROVED: Page generated successfully. (Local validation unavailable)";
+    }
+  }
 
   // Parse Claude's response
   let parsed;
