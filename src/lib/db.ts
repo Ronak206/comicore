@@ -213,7 +213,7 @@ export async function updateProject(
     delete updateFields.style;
   }
 
-  const book = await Book.findByIdAndUpdate(id, updateFields, { new: true });
+  const book = await Book.findByIdAndUpdate(id, updateFields, { returnDocument: 'after' });
   if (!book) return null;
 
   return toProjectData(book);
@@ -279,7 +279,7 @@ export async function upsertWorld(
   await World.findOneAndUpdate(
     { bookId: projectId },
     { bookId: projectId, ...world },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   );
 
   return getProject(projectId);
@@ -296,7 +296,7 @@ export async function addPage(
   // Check if page with this number already exists
   const existing = await Page.findOne({ bookId: projectId, number: page.number });
   if (existing) {
-    await Page.findByIdAndUpdate(existing._id, page, { new: true });
+    await Page.findByIdAndUpdate(existing._id, page, { returnDocument: 'after' });
   } else {
     await Page.create({
       bookId: projectId,

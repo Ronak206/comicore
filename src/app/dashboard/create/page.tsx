@@ -36,14 +36,15 @@ interface Character {
 
 // ─── Step Config ─────────────────────────────────
 
+// Workflow: Story → Characters → World → Style → Overview → Page Index → Chapters → Build
 const steps: { key: WizardStep; label: string; icon: typeof BookOpen }[] = [
   { key: "story", label: "Story", icon: BookOpen },
   { key: "characters", label: "Characters", icon: Users },
   { key: "world", label: "World", icon: Globe },
   { key: "style", label: "Art Style", icon: Palette },
   { key: "overview", label: "Overview", icon: Eye },
-  { key: "chapters", label: "Chapters", icon: LayoutGrid },
   { key: "pageIndex", label: "Page Index", icon: BookOpen },
+  { key: "chapters", label: "Chapters", icon: LayoutGrid },
 ];
 
 export default function CreateComicPage() {
@@ -274,6 +275,7 @@ export default function CreateComicPage() {
   };
 
   // ─── Handle Next with side-effects ─────────────
+  // Workflow: Overview → Page Index → Chapters → Build
   const handleNext = async () => {
     if (currentStep === "style") {
       // Save project before overview — saveProject returns the ID directly
@@ -284,13 +286,13 @@ export default function CreateComicPage() {
         handleGenerateOverview();
       }
     } else if (currentStep === "overview" && overview) {
-      setCurrentStep("chapters");
-      // Auto-generate chapters
-      handleGenerateChapters();
-    } else if (currentStep === "chapters" && chapters.length > 0) {
       setCurrentStep("pageIndex");
-      // Auto-generate page index
+      // Auto-generate page index FIRST
       handleGeneratePageIndex();
+    } else if (currentStep === "pageIndex" && pageIndex.length > 0) {
+      setCurrentStep("chapters");
+      // Auto-generate chapters AFTER page index
+      handleGenerateChapters();
     } else {
       goNext();
     }
@@ -327,7 +329,8 @@ export default function CreateComicPage() {
             key={step.key}
             onClick={() => {
               // Can only go to steps we've passed or current
-              if (i <= stepIndex || (step.key === "overview" && projectId) || (step.key === "chapters" && overview) || (step.key === "pageIndex" && chapters.length > 0)) {
+              // New order: Overview → Page Index → Chapters
+              if (i <= stepIndex || (step.key === "overview" && projectId) || (step.key === "pageIndex" && overview) || (step.key === "chapters" && pageIndex.length > 0)) {
                 setCurrentStep(step.key);
               }
             }}

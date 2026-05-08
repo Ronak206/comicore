@@ -222,6 +222,7 @@ Break this into chapters and story beats. Return ONLY JSON.`,
 }
 
 // ─── AI: Generate Page Index ───────────────────────
+// Generates page index BEFORE chapters - based on story overview only
 
 export async function generatePageIndex(projectId: string): Promise<{
   pageIndex: Array<{
@@ -240,9 +241,12 @@ export async function generatePageIndex(projectId: string): Promise<{
     .map((c) => `${c.name} (${c.role})`)
     .join(", ");
 
-  const chapterSummary = project.chapters
-    .map((ch) => `Chapter ${ch.number}: "${ch.title}" (Pages ${ch.pageRange}) - ${ch.description}`)
-    .join("\n");
+  // Use chapters if available, otherwise generate without chapter context
+  const chapterSummary = project.chapters?.length > 0
+    ? project.chapters.map((ch) => `Chapter ${ch.number}: "${ch.title}" (Pages ${ch.pageRange}) - ${ch.description}`).join("\n")
+    : "Chapters will be generated after page index approval.";
+
+  const hasChapters = project.chapters?.length > 0;
 
   const req: AIRequest = {
     system: `You are a comic story planner. Create a detailed page-by-page index for a ${project.pageGoal}-page comic.
@@ -255,7 +259,7 @@ Return ONLY valid JSON (no markdown, no code fences):
       "pageNumber": 1,
       "title": "Page Title",
       "description": "Brief description of what happens on this page",
-      "chapter": "Chapter 1",
+      "chapter": "Act 1",
       "keyEvents": ["Event 1", "Event 2"]
     }
   ]
@@ -264,9 +268,11 @@ Return ONLY valid JSON (no markdown, no code fences):
 Important rules:
 - Create exactly ${project.pageGoal} pages
 - Each page should have a unique title and description
-- Map pages to their respective chapters
+- ${hasChapters ? "Map pages to their respective chapters" : "Divide pages into logical acts (Act 1, Act 2, Act 3, etc.) based on story structure"}
 - Include 1-3 key events per page
-- Ensure story flows logically from beginning to end`,
+- Ensure story flows logically from beginning to end
+- Start with an opening page that sets the scene
+- End with a climactic or resolution page`,
     user: `COMIC: ${project.title}
 GENRE: ${project.genre}
 TONE: ${project.tone}
@@ -278,8 +284,7 @@ ${characterSummary || "No characters defined"}
 STORY OVERVIEW:
 ${project.roughOverview}
 
-CHAPTER BREAKDOWN:
-${chapterSummary}
+${hasChapters ? `CHAPTER BREAKDOWN:\n${chapterSummary}` : "Create a natural story flow from beginning to end."}
 
 Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON.`,
   };
