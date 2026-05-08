@@ -244,8 +244,22 @@ export async function generatePageIndex(projectId: string): Promise<{
   }>;
   project: ProjectData;
 }> {
+  console.log("[Story Engine] generatePageIndex called for project:", projectId);
+  
   const project = await getProject(projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    console.error("[Story Engine] Project not found:", projectId);
+    throw new Error("Project not found");
+  }
+
+  console.log("[Story Engine] Project found:", project.title);
+  console.log("[Story Engine] Rough overview exists:", !!project.roughOverview);
+  
+  // Check if we have the required data
+  if (!project.roughOverview) {
+    console.error("[Story Engine] Missing roughOverview - cannot generate page index");
+    throw new Error("Story overview must be generated before creating page index. Please go back to the Overview step and click 'Generate Overview'.");
+  }
 
   const characterSummary = project.characters
     .map((c) => `${c.name} (${c.role})`)
@@ -299,8 +313,12 @@ ${hasChapters ? `CHAPTER BREAKDOWN:\n${chapterSummary}` : "Create a natural stor
 Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON.`,
   };
 
+  console.log("[Story Engine] Calling aiThink for page index...");
   const response = await aiThink(req);
+  console.log("[Story Engine] aiThink response received");
+  
   let rawContent = extractContent(response);
+  console.log("[Story Engine] Raw content length:", rawContent?.length);
 
   // Strip markdown code fences if present
   rawContent = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
@@ -308,11 +326,15 @@ Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON
   let parsed;
   try {
     parsed = JSON.parse(rawContent);
-  } catch {
+    console.log("[Story Engine] JSON parsed successfully");
+  } catch (parseError) {
+    console.error("[Story Engine] JSON parse error:", parseError);
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       parsed = JSON.parse(jsonMatch[0]);
+      console.log("[Story Engine] JSON extracted via regex");
     } else {
+      console.error("[Story Engine] Could not extract JSON from response");
       throw new Error("Failed to parse page index from AI response");
     }
   }
@@ -325,6 +347,8 @@ Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON
     keyEvents: p.keyEvents || [],
   }));
 
+  console.log("[Story Engine] Parsed", pageIndex.length, "pages from AI");
+
   // Ensure we have exactly pageGoal pages
   while (pageIndex.length < project.pageGoal) {
     const num = pageIndex.length + 1;
@@ -336,6 +360,8 @@ Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON
       keyEvents: [],
     });
   }
+
+  console.log("[Story Engine] Final page count:", pageIndex.length);
 
   const updated = await updateProject(projectId, {
     status: "index-ready",
