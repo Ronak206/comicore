@@ -1,13 +1,13 @@
 /**
  * Comicore AI Worker Client
  *
- * Direct API calls to AI models for comic generation via OpenRouter.
- * Primary Model: openrouter/owl-alpha
- * Fallback Models: anthropic/claude-3.5-sonnet, openai/gpt-4o-mini
+ * Direct API calls to AI models for comic generation.
+ * API: api.aisubscription.shop
+ * Primary Model: google/gemini-2.5-flash
  *
  * Features:
  * - Automatic retry with exponential backoff for rate limits
- * - Fallback to alternative models on failure
+ * - Multiple fallback models on failure
  *
  * Endpoints:
  *   aiWrite()   — Story, dialogue, scripts
@@ -18,26 +18,29 @@
 
 // ─── Config ──────────────────────────────────────
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME || "Comicore";
+const API_URL = "https://api.aisubscription.shop/v1/chat/completions";
+const API_KEY = process.env.AI_API_KEY || "sk-onRjqG1aC1qN1lrpArhdn16QjqTExJW2hX-ZSqkMNgY";
 
-// Model configuration with fallbacks
-const PRIMARY_MODEL = process.env.AI_MODEL || "openrouter/owl-alpha";
+// Model configuration with fallbacks (in priority order)
+const PRIMARY_MODEL = process.env.AI_MODEL || "google/gemini-2.5-flash";
+
 const FALLBACK_MODELS = [
-  "anthropic/claude-3.5-sonnet",
-  "openai/gpt-4o-mini",
-  "google/gemini-flash-1.5",
+  "google/gemini-2.5-flash-lite",
+  "google/gemini-3.1-flash-lite-preview",
+  "google/gemini-2.5-pro",
+  "google/gemini-3.1-pro-preview",
+  "Qwen/Qwen3.6-27B",
+  "minimax-m2.5-thinking",
+  "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4",
 ];
 
 // Retry configuration
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 2000; // 2 seconds
 
-console.log("[AI Worker] Initialized with OpenRouter API");
+console.log("[AI Worker] Initialized with AI Subscription API");
 console.log("[AI Worker] Primary Model:", PRIMARY_MODEL);
-console.log("[AI Worker] Fallback Models:", FALLBACK_MODELS.join(", "));
+console.log("[AI Worker] Fallback Models:", FALLBACK_MODELS.length, "models available");
 
 // ─── Types ───────────────────────────────────────
 
@@ -50,6 +53,7 @@ export interface AIRequest {
   system: string;
   user: string;
   history?: Message[];
+  maxTokens?: number;
 }
 
 export interface SingleModelResponse {
@@ -90,29 +94,32 @@ function delay(ms: number): Promise<void> {
 
 // ─── Internal API Call with Retry & Fallback ──────────────────────────────
 
-async function callOpenRouter(
+async function callAI(
   model: string, 
   messages: Message[], 
+  maxTokens: number = 4096,
   retryCount: number = 0,
-  useFallback: boolean = false
+  isFallback: boolean = false
 ): Promise<any> {
-  const currentModel = useFallback ? model : PRIMARY_MODEL;
-  console.log(`[AI Worker] Calling OpenRouter with model: ${currentModel}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+  const currentModel = isFallback ? model : PRIMARY_MODEL;
+  console.log(`[AI Worker] Calling model: ${currentModel}${retryCount > 0 ? ` (retry ${retryCount})` : ''}${isFallback ? ' [fallback]' : ''}`);
   
-  if (!OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY is not configured. Please add it to your .env.local file.");
+  if (!API_KEY) {
+    throw new Error("AI_API_KEY is not configured. Please add it to your .env.local file.");
   }
 
   try {
-    const res = await fetch(OPENROUTER_API_URL, {
+    const res = await fetch(API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-        "HTTP-Referer": SITE_URL,
-        "X-OpenRouter-Title": SITE_NAME,
+        "Authorization": `Bearer ${API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model: currentModel, messages }),
+      body: JSON.stringify({ 
+        model: currentModel, 
+        messages,
+        max_tokens: maxTokens,
+      }),
     });
 
     const data = await res.json();
@@ -130,33 +137,38 @@ async function callOpenRouter(
           const backoffDelay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
           console.log(`[AI Worker] Retrying in ${backoffDelay}ms...`);
           await delay(backoffDelay);
-          return callOpenRouter(model, messages, retryCount + 1, useFallback);
+          return callAI(model, messages, maxTokens, retryCount + 1, isFallback);
         }
         
         // If retries exhausted, try fallback models
-        if (!useFallback) {
+        if (!isFallback) {
           console.log("[AI Worker] Primary model retries exhausted, trying fallback models...");
           for (const fallbackModel of FALLBACK_MODELS) {
             try {
               console.log(`[AI Worker] Trying fallback model: ${fallbackModel}`);
-              const fallbackRes = await fetch(OPENROUTER_API_URL, {
+              const fallbackRes = await fetch(API_URL, {
                 method: "POST",
                 headers: {
-                  "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-                  "HTTP-Referer": SITE_URL,
-                  "X-OpenRouter-Title": SITE_NAME,
+                  "Authorization": `Bearer ${API_KEY}`,
                   "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ model: fallbackModel, messages }),
+                body: JSON.stringify({ 
+                  model: fallbackModel, 
+                  messages,
+                  max_tokens: maxTokens,
+                }),
               });
 
               if (fallbackRes.ok) {
                 const fallbackData = await fallbackRes.json();
                 console.log(`[AI Worker] Fallback model ${fallbackModel} succeeded`);
                 return fallbackData;
+              } else {
+                const errData = await fallbackRes.json();
+                console.warn(`[AI Worker] Fallback ${fallbackModel} failed:`, errData.error?.message || fallbackRes.status);
               }
-            } catch (fallbackError) {
-              console.warn(`[AI Worker] Fallback model ${fallbackModel} failed:`, fallbackError);
+            } catch (fallbackError: any) {
+              console.warn(`[AI Worker] Fallback model ${fallbackModel} error:`, fallbackError.message);
             }
           }
         }
@@ -164,8 +176,8 @@ async function callOpenRouter(
         throw new Error(`Rate limited on all models. Please try again later.`);
       }
       
-      console.error(`[AI Worker] OpenRouter API error (${res.status}):`, data.error);
-      throw new Error(`OpenRouter API error (${res.status}): ${errorMessage}`);
+      console.error(`[AI Worker] API error (${res.status}):`, data.error);
+      throw new Error(`AI API error (${res.status}): ${errorMessage}`);
     }
 
     console.log(`[AI Worker] Response received from ${currentModel}`);
@@ -179,7 +191,7 @@ async function callOpenRouter(
         const backoffDelay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
         console.log(`[AI Worker] Network error, retrying in ${backoffDelay}ms...`);
         await delay(backoffDelay);
-        return callOpenRouter(model, messages, retryCount + 1, useFallback);
+        return callAI(model, messages, maxTokens, retryCount + 1, isFallback);
       }
     }
     
@@ -201,7 +213,7 @@ export async function aiWrite(req: AIRequest): Promise<SingleModelResponse> {
     { role: "user", content: req.user },
   ];
 
-  const data = await callOpenRouter(PRIMARY_MODEL, messages);
+  const data = await callAI(PRIMARY_MODEL, messages, req.maxTokens || 4096);
 
   return {
     task: "write",
@@ -222,7 +234,7 @@ export async function aiThink(req: AIRequest): Promise<SingleModelResponse> {
     { role: "user", content: req.user },
   ];
 
-  const data = await callOpenRouter(PRIMARY_MODEL, messages);
+  const data = await callAI(PRIMARY_MODEL, messages, req.maxTokens || 8192);
 
   return {
     task: "think",
@@ -243,7 +255,7 @@ export async function aiMemory(req: AIRequest): Promise<SingleModelResponse> {
     { role: "user", content: req.user },
   ];
 
-  const data = await callOpenRouter(PRIMARY_MODEL, messages);
+  const data = await callAI(PRIMARY_MODEL, messages, req.maxTokens || 8192);
 
   return {
     task: "memory",
@@ -268,7 +280,7 @@ export async function aiGenerate(req: AIRequest): Promise<PipelineResponse> {
     { role: "user", content: req.user },
   ];
 
-  const writeData = await callOpenRouter(PRIMARY_MODEL, writeMessages);
+  const writeData = await callAI(PRIMARY_MODEL, writeMessages, req.maxTokens || 4096);
   const writeOutput = writeData.choices?.[0]?.message?.content || "";
   console.log("[AI Worker] Write output length:", writeOutput.length);
 
@@ -284,7 +296,7 @@ export async function aiGenerate(req: AIRequest): Promise<PipelineResponse> {
     }
   ];
 
-  const validateData = await callOpenRouter(PRIMARY_MODEL, validateMessages);
+  const validateData = await callAI(PRIMARY_MODEL, validateMessages, 2048);
   const validateOutput = validateData.choices?.[0]?.message?.content || "";
   console.log("[AI Worker] Validation output length:", validateOutput.length);
 
