@@ -25,6 +25,44 @@ import {
   buildPageHistory,
   type AIRequest,
 } from "./ai-worker";
+
+// ─── Helpers ─────────────────────────────────────
+
+/**
+ * Normalize dialogue type to valid enum values
+ * Valid types: "speech", "thought", "narration", "sfx"
+ */
+function normalizeDialogueType(type: string): "speech" | "thought" | "narration" | "sfx" {
+  const typeLower = (type || "speech").toLowerCase().trim();
+  
+  // Direct matches
+  if (typeLower === "speech" || typeLower === "dialogue" || typeLower === "spoken") {
+    return "speech";
+  }
+  if (typeLower === "thought" || typeLower === "thinking") {
+    return "thought";
+  }
+  if (typeLower === "narration" || typeLower === "narrator" || typeLower === "caption") {
+    return "narration";
+  }
+  if (typeLower === "sfx" || typeLower === "sound" || typeLower === "sound-effect") {
+    return "sfx";
+  }
+  
+  // Common variations
+  if (typeLower.includes("monologue") || typeLower.includes("internal") || typeLower.includes("inner")) {
+    return "thought";
+  }
+  if (typeLower.includes("narrat")) {
+    return "narration";
+  }
+  if (typeLower.includes("speak") || typeLower.includes("say") || typeLower.includes("dialogue")) {
+    return "speech";
+  }
+  
+  // Default to speech
+  return "speech";
+}
 import {
   createProject,
   getProject,
@@ -565,7 +603,13 @@ Return ONLY valid JSON (no markdown, no code fences):
   ]
 }
 
-Create ${project.style.panelDensity === "sparse" ? "1-3" : project.style.panelDensity === "dense" ? "5-8" : "3-5"} panels.`,
+Create ${project.style.panelDensity === "sparse" ? "1-3" : project.style.panelDensity === "dense" ? "5-8" : "3-5"} panels.
+
+DIALOGUE TYPE MUST BE ONE OF: "speech", "thought", "narration", or "sfx"
+- "speech" for spoken dialogue
+- "thought" for internal thoughts/monologue
+- "narration" for narrator captions
+- "sfx" for sound effects`,
     user: `COMIC: ${project.title}
 PAGE: ${nextPageNum} of ${project.pageGoal}
 ${chapterContext}
@@ -678,7 +722,7 @@ Validate this page content against the checklist above. Check for continuity wit
     dialogue: (p.dialogue || []).map((d: any) => ({
       character: d.character || "",
       text: d.text || "",
-      type: d.type || "speech",
+      type: normalizeDialogueType(d.type),
     })),
     cameraAngle: p.cameraAngle || "medium-shot",
     mood: p.mood || project.tone || "tense",
@@ -755,7 +799,13 @@ export async function reviseCurrentPage(
   const req: AIRequest = {
     system: `You are an expert comic book scriptwriter revising a page based on user feedback. 
 Rewrite the page incorporating the feedback while maintaining consistency with the story.
-Return ONLY valid JSON (no markdown, no code fences) in the same format as before.`,
+Return ONLY valid JSON (no markdown, no code fences) in the same format as before.
+
+DIALOGUE TYPE MUST BE ONE OF: "speech", "thought", "narration", or "sfx"
+- "speech" for spoken dialogue
+- "thought" for internal thoughts/monologue
+- "narration" for narrator captions
+- "sfx" for sound effects`,
     user: `ORIGINAL PAGE ${page.number}:
 Title: ${page.title}
 Script: ${page.script}
@@ -798,7 +848,7 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
     dialogue: (p.dialogue || []).map((d: any) => ({
       character: d.character || "",
       text: d.text || "",
-      type: d.type || "speech",
+      type: normalizeDialogueType(d.type),
     })),
     cameraAngle: p.cameraAngle || "medium-shot",
     mood: p.mood || project.tone || "tense",

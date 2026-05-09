@@ -289,6 +289,9 @@ export default function ComicWorkspacePage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
+      // Reload project to get updated pages count
+      await loadProject();
+
       if (data.data.storyComplete) {
         setGenState("complete");
       } else {
