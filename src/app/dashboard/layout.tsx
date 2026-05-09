@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard,
   BookOpen,
@@ -29,61 +30,24 @@ const sidebarItems = [
   { icon: Settings, label: "Settings", href: "/dashboard/settings" },
 ];
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  plan: string;
-  avatar?: string;
-}
-
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
-
-  // Fetch current user
-  useEffect(() => {
-    async function fetchUser() {
-      try {
-        const response = await fetch("/api/auth/me");
-        const data = await response.json();
-        
-        if (data.success && data.user) {
-          setUser(data.user);
-        } else {
-          // Not authenticated, redirect to login
-          router.push("/login");
-        }
-      } catch (error) {
-        console.error("Failed to fetch user:", error);
-        router.push("/login");
-      } finally {
-        setLoading(false);
-      }
-    }
-    
-    fetchUser();
-  }, [router]);
+  const { user, loading, logout } = useAuth();
 
   // Logout handler
   const handleLogout = async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      router.push("/login");
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
+    await logout();
   };
 
   // Get user initials for avatar
   const getInitials = (name: string) => {
+    if (!name) return "U";
     return name
       .split(" ")
       .map((n) => n[0])
@@ -91,6 +55,9 @@ export default function DashboardLayout({
       .toUpperCase()
       .slice(0, 2);
   };
+
+  // Get display name
+  const displayName = user?.name && user.name !== "Creator" ? user.name : (user?.email?.split("@")[0] || "User");
 
   // Loading state
   if (loading) {
@@ -184,11 +151,11 @@ export default function DashboardLayout({
         <div className="p-4 border-t border-[#222]">
           <div className="flex items-center gap-3 px-2">
             <div className="w-8 h-8 bg-[#E8B931] flex items-center justify-center text-xs font-bold text-[#0A0A0A]">
-              {user ? getInitials(user.name) : <Zap className="w-4 h-4" />}
+              {user ? getInitials(displayName) : <Zap className="w-4 h-4" />}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-[#F5F5F0] truncate">
-                {user?.name || "Creator"}
+                {displayName}
               </div>
               <div className="text-xs text-[#555] truncate">
                 {user?.plan?.toUpperCase() || "FREE"} Plan
@@ -240,7 +207,7 @@ export default function DashboardLayout({
                 <div className="absolute top-1 right-1 w-2 h-2 bg-[#E8B931]" />
               </button>
               <div className="w-8 h-8 bg-[#E8B931] flex items-center justify-center text-xs font-bold text-[#0A0A0A]">
-                {user ? getInitials(user.name) : <Zap className="w-4 h-4" />}
+                {user ? getInitials(displayName) : <Zap className="w-4 h-4" />}
               </div>
             </div>
           </div>
