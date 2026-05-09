@@ -23,6 +23,8 @@ import {
   Eye,
   SkipForward,
   Send,
+  FileText,
+  RefreshCw,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────
@@ -130,6 +132,11 @@ export default function ComicWorkspacePage() {
   const [feedback, setFeedback] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
   
+  // Overview state
+  const [generatingOverview, setGeneratingOverview] = useState(false);
+  const [storyInput, setStoryInput] = useState("");
+  const [showStoryInput, setShowStoryInput] = useState(true);
+  
   // Page Index state
   const [generatingIndex, setGeneratingIndex] = useState(false);
   const [pageIndex, setPageIndex] = useState<Array<{
@@ -164,6 +171,36 @@ export default function ComicWorkspacePage() {
     loadProject();
   }, [loadProject]);
 
+  // ─── Generate Overview ─────────────────────────
+  const handleGenerateOverview = async () => {
+    if (!project) return;
+    
+    setGeneratingOverview(true);
+    setError(null);
+    
+    try {
+      const res = await fetch("/api/engine/overview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          projectId: id,
+          storyInput: storyInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      
+      // Reload project to get updated overview
+      await loadProject();
+      setStoryInput("");
+      setShowStoryInput(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to generate overview");
+    } finally {
+      setGeneratingOverview(false);
+    }
+  };
+
   // ─── Generate Page Index ─────────────────────────
   const handleGeneratePageIndex = async () => {
     if (!project) return;
@@ -190,6 +227,9 @@ export default function ComicWorkspacePage() {
     }
   };
 
+  // Check if overview exists
+  const hasOverview = project?.roughOverview && project.roughOverview.trim().length > 0;
+  
   // Check if page index exists
   const hasPageIndex = pageIndex && pageIndex.length > 0;
 
@@ -430,20 +470,95 @@ export default function ComicWorkspacePage() {
             </div>
           )}
 
-          {/* Initial generate button */}
+          {/* Initial generate button - Check workflow state */}
           {genState === "idle" && !showInstructions && (
-            <div className="bg-[#111] border border-[#222] p-12 text-center">
-              {/* Check if page index exists */}
-              {!hasPageIndex ? (
-                <>
+            <div className="space-y-6">
+              {/* Step 1: Check if Overview exists */}
+              {!hasOverview ? (
+                <div className="bg-[#111] border border-[#222] p-8">
+                  <FileText className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2 text-center">Generate Story Overview</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto text-center">
+                    Before generating pages, we need to create a story overview. This will guide the entire comic narrative.
+                  </p>
+                  <p className="text-xs text-[#555] mb-6 text-center">
+                    Claude will create a compelling story based on your project details.
+                  </p>
+                  
+                  {/* Optional Story Input */}
+                  {showStoryInput ? (
+                    <div className="max-w-lg mx-auto mb-6">
+                      <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block mb-2">
+                        Story Ideas (Optional)
+                      </label>
+                      <p className="text-xs text-[#555] mb-3">
+                        Have a specific story in mind? Describe it briefly. Otherwise, AI will create a story based on your project details.
+                      </p>
+                      <textarea
+                        value={storyInput}
+                        onChange={(e) => setStoryInput(e.target.value)}
+                        rows={4}
+                        className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
+                        placeholder="E.g., 'A young hacker discovers a conspiracy in the megacity and must team up with unlikely allies to expose the truth. The story should have a twist ending where the protagonist realizes they were part of the system all along.'"
+                      />
+                    </div>
+                  ) : null}
+                  
+                  <div className="flex items-center justify-center gap-3">
+                    {!showStoryInput && (
+                      <button
+                        onClick={() => setShowStoryInput(true)}
+                        className="px-4 py-2.5 text-xs text-[#666] tracking-wide uppercase border border-[#333]"
+                      >
+                        Add Story Ideas
+                      </button>
+                    )}
+                    <button
+                      onClick={handleGenerateOverview}
+                      disabled={generatingOverview}
+                      className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
+                    >
+                      {generatingOverview ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" /> Generating Overview...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" /> Generate Overview
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : !hasPageIndex ? (
+                /* Step 2: Generate Page Index */
+                <div className="bg-[#111] border border-[#222] p-8">
                   <BookOpen className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
-                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Page Index Required</h3>
-                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
-                    Before generating pages, you need to create a Page Index. This gives you an overview of all pages before generation.
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2 text-center">Generate Page Index</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto text-center">
+                    Great! You have a story overview. Now let&apos;s generate a page index to plan all {totalPages} pages.
                   </p>
-                  <p className="text-xs text-[#555] mb-6">
-                    Claude will plan out all {totalPages} pages, then Gemini will validate the plan.
+                  <p className="text-xs text-[#555] mb-6 text-center">
+                    Claude will plan out all pages with titles and descriptions, then Gemini will validate the plan.
                   </p>
+                  
+                  {/* Show the existing overview */}
+                  <div className="max-w-2xl mx-auto mb-6 p-4 bg-[#0A0A0A] border border-[#222]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-[#E8B931] tracking-[0.15em] uppercase">Story Overview</span>
+                      <button
+                        onClick={() => {
+                          setStoryInput("");
+                          setShowStoryInput(true);
+                        }}
+                        className="text-xs text-[#666] tracking-wide uppercase flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3" /> Regenerate
+                      </button>
+                    </div>
+                    <p className="text-xs text-[#999] leading-relaxed">{project?.roughOverview}</p>
+                  </div>
+                  
                   <button
                     onClick={handleGeneratePageIndex}
                     disabled={generatingIndex}
@@ -459,9 +574,10 @@ export default function ComicWorkspacePage() {
                       </>
                     )}
                   </button>
-                </>
+                </div>
               ) : (
-                <>
+                /* Step 3: Generate Pages */
+                <div className="bg-[#111] border border-[#222] p-12 text-center">
                   <Sparkles className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
                   <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Ready to Generate</h3>
                   <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
@@ -494,7 +610,7 @@ export default function ComicWorkspacePage() {
                       )}
                     </button>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}
@@ -756,16 +872,22 @@ export default function ComicWorkspacePage() {
                   </div>
                 ))}
               </div>
-            ) : (
+            ) : hasOverview ? (
               <div className="text-center py-12">
                 <BookOpen className="w-10 h-10 text-[#333] mx-auto mb-4" />
-                <p className="text-sm text-[#555]">No page index generated yet.</p>
+                <p className="text-sm text-[#555] mb-4">No page index generated yet.</p>
                 <button
                   onClick={handleGeneratePageIndex}
                   className="mt-4 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2 mx-auto"
                 >
                   <Sparkles className="w-4 h-4" /> Generate Page Index
                 </button>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <FileText className="w-10 h-10 text-[#333] mx-auto mb-4" />
+                <p className="text-sm text-[#555] mb-2">Generate an Overview first.</p>
+                <p className="text-xs text-[#444]">Go to the Generate tab to create your story overview.</p>
               </div>
             )}
           </div>

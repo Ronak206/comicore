@@ -6,12 +6,15 @@ import { generateOverview } from "@/lib/story-engine";
  *
  * Step 2: AI generates a rough story overview based on project data.
  *
- * Body: { projectId: string }
+ * Body: { projectId: string, storyInput?: string }
+ * - projectId: Required - The project ID
+ * - storyInput: Optional - User's brief story description/ideas to incorporate
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     console.log("[Overview API] Received request with projectId:", body.projectId);
+    console.log("[Overview API] Story input provided:", !!body.storyInput);
 
     if (!body.projectId) {
       console.error("[Overview API] Missing projectId");
@@ -19,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log("[Overview API] Calling generateOverview...");
-    const { overview, project } = await generateOverview(body.projectId);
+    const { overview, project } = await generateOverview(body.projectId, body.storyInput);
     console.log("[Overview API] Overview generated successfully, length:", overview?.length);
 
     return NextResponse.json({

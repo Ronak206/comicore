@@ -73,8 +73,9 @@ export async function updateProjectStyle(
 
 // ─── AI: Generate Rough Overview ─────────────────
 
-export async function generateOverview(projectId: string): Promise<{ overview: string; project: ProjectData }> {
+export async function generateOverview(projectId: string, storyInput?: string): Promise<{ overview: string; project: ProjectData }> {
   console.log("[Story Engine] generateOverview called for project:", projectId);
+  console.log("[Story Engine] Story input provided:", !!storyInput);
   
   const project = await getProject(projectId);
   if (!project) {
@@ -90,8 +91,15 @@ export async function generateOverview(projectId: string): Promise<{ overview: s
 
   // Check if synopsis is empty - AI will create full story
   const hasSynopsis = project.synopsis && project.synopsis.trim().length > 0;
+  const hasStoryInput = storyInput && storyInput.trim().length > 0;
   
-  const systemPrompt = hasSynopsis 
+  const systemPrompt = hasStoryInput 
+    ? `You are a master comic story architect. Create a compelling story overview based on the user's story ideas and the comic details provided.
+Incorporate the user's vision while expanding it into a complete narrative.
+This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end.
+Mention key plot points, character arcs, and the central conflict.
+Write 300-500 words. Be creative, vivid and specific.`
+    : hasSynopsis 
     ? `You are a master comic story architect. Given the comic details below, write a compelling rough overview/outline of the full story. 
 This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end. 
 Mention key plot points, character arcs, and the central conflict. 
@@ -110,7 +118,9 @@ Tone: ${project.tone}
 Target Audience: ${project.targetAudience}
 Target Pages: ${project.pageGoal}
 
-${hasSynopsis ? `Initial Story Idea:\n${project.synopsis}\n` : "No initial story provided - create an original story based on the title and genre."}
+${hasStoryInput ? `USER'S STORY IDEAS (MUST INCORPORATE):
+${storyInput}
+` : hasSynopsis ? `Initial Story Idea:\n${project.synopsis}\n` : "No initial story provided - create an original story based on the title and genre."}
 
 Characters:
 ${characterSummary || "No characters defined yet - create appropriate characters for this story."}
