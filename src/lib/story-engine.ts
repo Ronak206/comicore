@@ -83,26 +83,37 @@ export async function generateOverview(projectId: string): Promise<{ overview: s
   }
 
   console.log("[Story Engine] Project found:", project.title);
+  
   const characterSummary = project.characters
     .map((c) => `${c.name} (${c.role}): ${c.description}`)
     .join("\n");
 
-  const req: AIRequest = {
-    system: `You are a master comic story architect. Given the comic details below, write a compelling rough overview/outline of the full story. 
+  // Check if synopsis is empty - AI will create full story
+  const hasSynopsis = project.synopsis && project.synopsis.trim().length > 0;
+  
+  const systemPrompt = hasSynopsis 
+    ? `You are a master comic story architect. Given the comic details below, write a compelling rough overview/outline of the full story. 
 This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end. 
 Mention key plot points, character arcs, and the central conflict. 
-Write 200-400 words. Be vivid and specific.`,
+Write 200-400 words. Be vivid and specific.`
+    : `You are a master comic story architect. Create a compelling story overview based on the title, genre, characters, and world details provided.
+Since no initial story idea was given, invent an engaging plot that fits the genre and world.
+This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end.
+Mention key plot points, character arcs, and the central conflict.
+Write 300-500 words. Be creative, vivid and specific.`;
+
+  const req: AIRequest = {
+    system: systemPrompt,
     user: `Title: ${project.title}
 Genre: ${project.genre}
 Tone: ${project.tone}
 Target Audience: ${project.targetAudience}
 Target Pages: ${project.pageGoal}
 
-Synopsis:
-${project.synopsis}
+${hasSynopsis ? `Initial Story Idea:\n${project.synopsis}\n` : "No initial story provided - create an original story based on the title and genre."}
 
 Characters:
-${characterSummary || "No characters defined yet"}
+${characterSummary || "No characters defined yet - create appropriate characters for this story."}
 
 World:
 ${project.world.setting || "Not defined yet"}
@@ -114,7 +125,7 @@ World Rules: ${project.world.rules || "Not defined"}
 Art Style: ${project.style.artStyle}
 Panel Density: ${project.style.panelDensity}
 
-Write a rough story overview that covers the full narrative arc.`,
+Write a complete story overview that covers the full narrative arc from beginning to end.`,
   };
 
   console.log("[Story Engine] Calling aiWrite for overview...");
@@ -124,10 +135,13 @@ Write a rough story overview that covers the full narrative arc.`,
   const overview = extractContent(response);
   console.log("[Story Engine] Extracted overview length:", overview?.length);
 
+  // Store the overview in MongoDB for later reference
   const updated = await updateProject(projectId, {
     roughOverview: overview,
     status: "overview",
   });
+  
+  console.log("[Story Engine] Overview stored in database for project:", projectId);
 
   return { overview, project: updated! };
 }

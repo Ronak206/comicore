@@ -130,7 +130,8 @@ export default function CreateComicPage() {
   const canGoNext = (): boolean => {
     switch (currentStep) {
       case "story":
-        return storyForm.title.trim().length > 0 && storyForm.synopsis.trim().length > 20;
+        // Title required, synopsis is optional (brief story info)
+        return storyForm.title.trim().length > 0;
       case "characters":
         return characters.some((c) => c.name.trim().length > 0);
       case "world":
@@ -138,11 +139,13 @@ export default function CreateComicPage() {
       case "style":
         return true;
       case "overview":
+        // Must have generated and stored overview
         return overview.length > 0;
+      case "pageIndex":
+        // Must have generated and stored page index
+        return pageIndex.length > 0;
       case "chapters":
         return chapters.length > 0;
-      case "pageIndex":
-        return pageIndex.length > 0;
       default:
         return false;
     }
@@ -302,23 +305,20 @@ export default function CreateComicPage() {
   };
 
   // ─── Handle Next with side-effects ─────────────
-  // Workflow: Overview → Page Index → Chapters → Build
+  // Workflow: Story → Characters → World → Style → Overview (manual) → Page Index (manual) → Chapters → Build
   const handleNext = async () => {
     if (currentStep === "style") {
-      // Save project before overview — saveProject returns the ID directly
+      // Save project before moving to overview
       const id = await saveProject();
       if (id) {
         setCurrentStep("overview");
-        // Auto-generate overview (it will use ref, so safe to call)
-        handleGenerateOverview();
       }
     } else if (currentStep === "overview" && overview) {
+      // Overview was generated, move to page index
       setCurrentStep("pageIndex");
-      // Auto-generate page index FIRST
-      handleGeneratePageIndex();
     } else if (currentStep === "pageIndex" && pageIndex.length > 0) {
+      // Page index generated, now auto-generate chapters
       setCurrentStep("chapters");
-      // Auto-generate chapters AFTER page index
       handleGenerateChapters();
     } else {
       goNext();
@@ -424,15 +424,15 @@ export default function CreateComicPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Synopsis * (min 20 chars)</label>
+              <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block">Brief Story Info (Optional)</label>
               <textarea
                 value={storyForm.synopsis}
                 onChange={(e) => setStoryForm({ ...storyForm, synopsis: e.target.value })}
                 rows={5}
                 className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none leading-relaxed"
-                placeholder="Describe the overall story, main conflict, and what the reader should feel. The more detail, the better the AI will understand your vision."
+                placeholder="Briefly describe your story idea - main conflict, characters, setting. This helps AI understand your vision. Leave empty and AI will create from your genre/title."
               />
-              <div className="text-[10px] text-[#555]">{storyForm.synopsis.length} characters</div>
+              <div className="text-[10px] text-[#555]">{storyForm.synopsis.length} characters (optional - AI will expand this)</div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -775,6 +775,10 @@ export default function CreateComicPage() {
               )}
             </div>
 
+            <p className="text-xs text-[#555] mb-4">
+              Click "Generate Overview" to have Claude create a full story overview based on your inputs. This will be stored and used for consistent page generation.
+            </p>
+
             {loading && !overview ? (
               <div className="flex flex-col items-center justify-center py-12 gap-4">
                 <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
@@ -786,7 +790,7 @@ export default function CreateComicPage() {
               </div>
             ) : (
               <div className="text-center py-12">
-                <p className="text-sm text-[#555]">Click &quot;Generate Overview&quot; to let AI write your story overview.</p>
+                <p className="text-sm text-[#555]">Click "Generate Overview" to let AI write your full story overview.</p>
                 <button
                   onClick={handleGenerateOverview}
                   className="mt-4 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2 mx-auto"
@@ -813,6 +817,9 @@ export default function CreateComicPage() {
                   <div className="text-2xl font-black text-[#F5F5F0]">{storyForm.genre}</div>
                   <div className="text-[10px] text-[#555] uppercase tracking-wider">Genre</div>
                 </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-[#222] text-center">
+                <span className="text-[10px] text-[#4ade80] uppercase tracking-wider">✓ Overview stored for later reference</span>
               </div>
             </div>
           )}
@@ -920,7 +927,7 @@ export default function CreateComicPage() {
             </div>
 
             <p className="text-xs text-[#555] mb-4">
-              Review the planned page-by-page breakdown below. Once approved, click &quot;Start Building&quot; to begin generating actual pages.
+              Click "Generate Index" to create a page-by-page breakdown. This index will be stored and used for consistent chapter and page generation.
             </p>
 
             {loading && pageIndex.length === 0 ? (
@@ -958,12 +965,12 @@ export default function CreateComicPage() {
               </div>
             ) : (
               <div className="text-center py-12">
-                <p className="text-sm text-[#555]">Click &quot;Generate Index&quot; to create a page-by-page breakdown.</p>
+                <p className="text-sm text-[#555]">Click "Generate Index" to create a page-by-page breakdown.</p>
                 <button
                   onClick={handleGeneratePageIndex}
                   className="mt-4 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2 mx-auto"
                 >
-                  <Sparkles className="w-4 h-4" /> Generate Page Index
+                  <Sparkles className="w-4 h-4" /> Generate Index
                 </button>
               </div>
             )}
@@ -973,23 +980,22 @@ export default function CreateComicPage() {
           {pageIndex.length > 0 && (
             <div className="bg-[#111] border border-[#222] p-5">
               <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-3">Summary</h3>
-              <div className="grid grid-cols-4 gap-4 text-center">
+              <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
                   <div className="text-2xl font-black text-[#F5F5F0]">{pageIndex.length}</div>
                   <div className="text-[10px] text-[#555] uppercase tracking-wider">Total Pages</div>
-                </div>
-                <div>
-                  <div className="text-2xl font-black text-[#F5F5F0]">{chapters.length}</div>
-                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Chapters</div>
                 </div>
                 <div>
                   <div className="text-2xl font-black text-[#F5F5F0]">{characters.filter((c) => c.name.trim()).length}</div>
                   <div className="text-[10px] text-[#555] uppercase tracking-wider">Characters</div>
                 </div>
                 <div>
-                  <div className="text-2xl font-black text-[#E8B931]">{storyForm.genre.split("-")[0]}</div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{storyForm.genre.split("-")[0]}</div>
                   <div className="text-[10px] text-[#555] uppercase tracking-wider">Genre</div>
                 </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-[#222] text-center">
+                <span className="text-[10px] text-[#4ade80] uppercase tracking-wider">✓ Page index stored for later reference</span>
               </div>
             </div>
           )}
