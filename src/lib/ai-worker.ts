@@ -22,8 +22,10 @@ const API_URL = "https://api.aisubscription.shop/v1/chat/completions";
 const API_KEY = process.env.AI_API_KEY || "sk-onRjqG1aC1qN1lrpArhdn16QjqTExJW2hX-ZSqkMNgY";
 
 // Model configuration with fallbacks (in priority order)
-const PRIMARY_MODEL = process.env.AI_MODEL || "google/gemini-2.5-flash";
+// Primary model for all AI operations
+const PRIMARY_MODEL = "google/gemini-2.5-flash";
 
+// Fallback models when primary is rate-limited or fails
 const FALLBACK_MODELS = [
   "google/gemini-2.5-flash-lite",
   "google/gemini-3.1-flash-lite-preview",
@@ -125,24 +127,24 @@ async function callAI(
     const data = await res.json();
 
     if (!res.ok) {
-      const errorMessage = data.error?.message || data.error || "Request failed";
+      const errorMessage = data.message || data.error?.message || data.error || "Request failed";
       const errorCode = data.error?.code || res.status;
       
-      // Handle rate limiting (429) with retry
-      if (errorCode === 429 || res.status === 429) {
-        console.warn(`[AI Worker] Rate limited on model ${currentModel}`);
+      // Handle rate limiting (429) or model not found (404) with retry/fallback
+      if (errorCode === 429 || res.status === 429 || errorCode === 404 || res.status === 404) {
+        console.warn(`[AI Worker] Error on model ${currentModel}: ${errorMessage}`);
         
-        // Try with exponential backoff first
-        if (retryCount < MAX_RETRIES) {
+        // Try with exponential backoff first (only for rate limits)
+        if ((errorCode === 429 || res.status === 429) && retryCount < MAX_RETRIES) {
           const backoffDelay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
           console.log(`[AI Worker] Retrying in ${backoffDelay}ms...`);
           await delay(backoffDelay);
           return callAI(model, messages, maxTokens, retryCount + 1, isFallback);
         }
         
-        // If retries exhausted, try fallback models
+        // If retries exhausted or model not found, try fallback models
         if (!isFallback) {
-          console.log("[AI Worker] Primary model retries exhausted, trying fallback models...");
+          console.log("[AI Worker] Primary model failed, trying fallback models...");
           for (const fallbackModel of FALLBACK_MODELS) {
             try {
               console.log(`[AI Worker] Trying fallback model: ${fallbackModel}`);
@@ -165,7 +167,7 @@ async function callAI(
                 return fallbackData;
               } else {
                 const errData = await fallbackRes.json();
-                console.warn(`[AI Worker] Fallback ${fallbackModel} failed:`, errData.error?.message || fallbackRes.status);
+                console.warn(`[AI Worker] Fallback ${fallbackModel} failed:`, errData.message || errData.error?.message || fallbackRes.status);
               }
             } catch (fallbackError: any) {
               console.warn(`[AI Worker] Fallback model ${fallbackModel} error:`, fallbackError.message);
@@ -173,10 +175,10 @@ async function callAI(
           }
         }
         
-        throw new Error(`Rate limited on all models. Please try again later.`);
+        throw new Error(`All models failed. Please try again later.`);
       }
       
-      console.error(`[AI Worker] API error (${res.status}):`, data.error);
+      console.error(`[AI Worker] API error (${res.status}):`, data);
       throw new Error(`AI API error (${res.status}): ${errorMessage}`);
     }
 
