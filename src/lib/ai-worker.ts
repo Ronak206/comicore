@@ -1,31 +1,28 @@
 /**
  * Comicore AI Worker Client
  *
- * Direct API calls to AI models for comic generation.
- * Models:
- *   - Claude Sonnet 4.5 (story, dialogue, scripts)
- *   - Claude Sonnet 4.5 Thinking (deep planning, revision)
- *   - Gemini 3.1 Pro (world-building, consistency checks)
+ * Direct API calls to AI models for comic generation via OpenRouter.
+ * Primary Model: openrouter/owl-alpha
  *
  * Endpoints:
- *   aiWrite()   — Claude Sonnet 4.5 (story, dialogue, scripts)
- *   aiThink()   — Claude 4.5 Thinking (deep planning, revision)
- *   aiMemory()  — Gemini 3.1 Pro (world-building, consistency)
- *   aiGenerate()— Pipeline: Claude writes → Gemini validates
+ *   aiWrite()   — Story, dialogue, scripts
+ *   aiThink()   — Deep planning, revision analysis
+ *   aiMemory()  — World-building, consistency checks
+ *   aiGenerate()— Pipeline: Write → Validate
  */
 
 // ─── Config ──────────────────────────────────────
 
-const API_URL = "https://api.aisubscription.shop/v1/chat/completions";
-const API_KEY = process.env.AI_API_KEY || "sk-onRjqG1aC1qN1lrpArhdn16QjqTExJW2hX-ZSqkMNgY";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME || "Comicore";
 
-const MODELS = {
-  write: "claude-sonnet-4.5",
-  think: "claude-sonnet-4.5-thinking",
-  memory: "google/gemini-3.1-pro-preview",
-};
+// Model configuration
+const MODEL = process.env.AI_MODEL || "openrouter/owl-alpha";
 
-console.log("[AI Worker] Initialized with direct API calls");
+console.log("[AI Worker] Initialized with OpenRouter API");
+console.log("[AI Worker] Model:", MODEL);
 
 // ─── Types ───────────────────────────────────────
 
@@ -57,13 +54,13 @@ export interface SingleModelResponse {
 
 export interface PipelineResponse {
   task: "generate";
-  pipeline: "claude_write → gemini_validate";
-  claude: {
+  pipeline: "write → validate";
+  write: {
     forced_model: string;
     actual_model: string;
     content: string;
   };
-  gemini: {
+  validate: {
     forced_model: string;
     actual_model: string;
     validation: string;
@@ -72,14 +69,20 @@ export interface PipelineResponse {
 
 // ─── Internal API Call ──────────────────────────────
 
-async function callAI(model: string, messages: Message[]): Promise<any> {
-  console.log(`[AI Worker] Calling model: ${model}`);
+async function callOpenRouter(model: string, messages: Message[]): Promise<any> {
+  console.log(`[AI Worker] Calling OpenRouter with model: ${model}`);
   
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY is not configured. Please add it to your .env.local file.");
+  }
+
   try {
-    const res = await fetch(API_URL, {
+    const res = await fetch(OPENROUTER_API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${API_KEY}`,
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": SITE_URL,
+        "X-OpenRouter-Title": SITE_NAME,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ model, messages }),
@@ -87,12 +90,13 @@ async function callAI(model: string, messages: Message[]): Promise<any> {
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
-      console.error(`[AI Worker] API error (${res.status}):`, errorData);
-      throw new Error(`AI API error (${res.status}): ${errorData.error || "Request failed"}`);
+      console.error(`[AI Worker] OpenRouter API error (${res.status}):`, errorData);
+      throw new Error(`OpenRouter API error (${res.status}): ${errorData.error?.message || errorData.error || "Request failed"}`);
     }
 
     const data = await res.json();
     console.log(`[AI Worker] Response received from ${model}`);
+    console.log(`[AI Worker] Tokens used - Prompt: ${data.usage?.prompt_tokens}, Completion: ${data.usage?.completion_tokens}`);
     
     return data;
   } catch (error: any) {
@@ -104,7 +108,7 @@ async function callAI(model: string, messages: Message[]): Promise<any> {
 // ─── Public API ──────────────────────────────────
 
 /**
- * Write endpoint — uses Claude Sonnet 4.5
+ * Write endpoint — uses configured model for story writing
  * Best for: story writing, dialogue, scripts, image prompts
  */
 export async function aiWrite(req: AIRequest): Promise<SingleModelResponse> {
@@ -114,18 +118,18 @@ export async function aiWrite(req: AIRequest): Promise<SingleModelResponse> {
     { role: "user", content: req.user },
   ];
 
-  const data = await callAI(MODELS.write, messages);
+  const data = await callOpenRouter(MODEL, messages);
 
   return {
     task: "write",
-    forced_model: MODELS.write,
+    forced_model: MODEL,
     actual_model: data.model,
     response: data,
   };
 }
 
 /**
- * Think endpoint — uses Claude 4.5 Thinking
+ * Think endpoint — uses configured model for deep thinking
  * Best for: deep planning, revision analysis, story architecture
  */
 export async function aiThink(req: AIRequest): Promise<SingleModelResponse> {
@@ -135,18 +139,18 @@ export async function aiThink(req: AIRequest): Promise<SingleModelResponse> {
     { role: "user", content: req.user },
   ];
 
-  const data = await callAI(MODELS.think, messages);
+  const data = await callOpenRouter(MODEL, messages);
 
   return {
     task: "think",
-    forced_model: MODELS.think,
+    forced_model: MODEL,
     actual_model: data.model,
     response: data,
   };
 }
 
 /**
- * Memory endpoint — uses Gemini 3.1 Pro
+ * Memory endpoint — uses configured model for context-heavy tasks
  * Best for: world-building, consistency checks, long context tasks
  */
 export async function aiMemory(req: AIRequest): Promise<SingleModelResponse> {
@@ -156,63 +160,63 @@ export async function aiMemory(req: AIRequest): Promise<SingleModelResponse> {
     { role: "user", content: req.user },
   ];
 
-  const data = await callAI(MODELS.memory, messages);
+  const data = await callOpenRouter(MODEL, messages);
 
   return {
     task: "memory",
-    forced_model: MODELS.memory,
+    forced_model: MODEL,
     actual_model: data.model,
     response: data,
   };
 }
 
 /**
- * Generate endpoint — Pipeline: Claude writes → Gemini validates
+ * Generate endpoint — Pipeline: Write → Validate
  * Best for: generating content that needs immediate consistency check
  * Returns both the generated content AND the validation result
  */
 export async function aiGenerate(req: AIRequest): Promise<PipelineResponse> {
-  console.log("[AI Worker] Starting pipeline: Claude write → Gemini validate");
+  console.log("[AI Worker] Starting pipeline: Write → Validate");
   
-  // Step 1 — Claude generates content
-  const claudeMessages: Message[] = [
+  // Step 1 — Generate content
+  const writeMessages: Message[] = [
     { role: "system", content: req.system },
     ...(req.history || []),
     { role: "user", content: req.user },
   ];
 
-  const claudeData = await callAI(MODELS.write, claudeMessages);
-  const claudeOutput = claudeData.choices?.[0]?.message?.content || "";
-  console.log("[AI Worker] Claude output length:", claudeOutput.length);
+  const writeData = await callOpenRouter(MODEL, writeMessages);
+  const writeOutput = writeData.choices?.[0]?.message?.content || "";
+  console.log("[AI Worker] Write output length:", writeOutput.length);
 
-  // Step 2 — Gemini validates
-  const geminiMessages: Message[] = [
+  // Step 2 — Validate
+  const validateMessages: Message[] = [
     {
       role: "system",
       content: "You are a continuity validator. Review the generated content for: 1) Character consistency 2) Plot holes 3) Visual continuity 4) Timeline accuracy. Reply with APPROVED if clean, or list specific issues."
     },
     {
       role: "user",
-      content: `Context:\n${(req.history || []).map(m => `${m.role}: ${m.content}`).join("\n")}\n\nGenerated content:\n${claudeOutput}\n\nValidate this content.`
+      content: `Context:\n${(req.history || []).map(m => `${m.role}: ${m.content}`).join("\n")}\n\nGenerated content:\n${writeOutput}\n\nValidate this content.`
     }
   ];
 
-  const geminiData = await callAI(MODELS.memory, geminiMessages);
-  const geminiOutput = geminiData.choices?.[0]?.message?.content || "";
-  console.log("[AI Worker] Gemini validation length:", geminiOutput.length);
+  const validateData = await callOpenRouter(MODEL, validateMessages);
+  const validateOutput = validateData.choices?.[0]?.message?.content || "";
+  console.log("[AI Worker] Validation output length:", validateOutput.length);
 
   return {
     task: "generate",
-    pipeline: "claude_write → gemini_validate",
-    claude: {
-      forced_model: MODELS.write,
-      actual_model: claudeData.model,
-      content: claudeOutput,
+    pipeline: "write → validate",
+    write: {
+      forced_model: MODEL,
+      actual_model: writeData.model,
+      content: writeOutput,
     },
-    gemini: {
-      forced_model: MODELS.memory,
-      actual_model: geminiData.model,
-      validation: geminiOutput,
+    validate: {
+      forced_model: MODEL,
+      actual_model: validateData.model,
+      validation: validateOutput,
     },
   };
 }
@@ -224,17 +228,17 @@ export function extractContent(res: SingleModelResponse): string {
   return res.response?.choices?.[0]?.message?.content || "";
 }
 
-/** Extract text from Claude output in pipeline response */
+/** Extract text from write output in pipeline response */
 export function extractClaudeContent(res: PipelineResponse): string {
-  return res.claude?.content || "";
+  return res.write?.content || "";
 }
 
-/** Extract validation text from Gemini output in pipeline response */
+/** Extract validation text from validate output in pipeline response */
 export function extractGeminiValidation(res: PipelineResponse): string {
-  return res.gemini?.validation || "";
+  return res.validate?.validation || "";
 }
 
-/** Check if Gemini validation passed */
+/** Check if validation passed */
 export function isValidationApproved(res: PipelineResponse): boolean {
   const validation = extractGeminiValidation(res).toUpperCase();
   return validation.includes("APPROVED");
