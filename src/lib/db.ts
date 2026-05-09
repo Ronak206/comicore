@@ -297,11 +297,33 @@ export async function addPage(
 ): Promise<ProjectData | null> {
   await db();
 
+  // Clean up any orphaned in-review pages for this project
+  // (pages that were generated but never approved)
+  const orphanedPages = await Page.find({
+    bookId: projectId,
+    status: "in-review",
+    number: { $ne: page.number } // Keep the current page number if exists
+  });
+  
+  if (orphanedPages.length > 0) {
+    console.log(`[DB] Cleaning up ${orphanedPages.length} orphaned in-review pages`);
+    await Page.deleteMany({
+      bookId: projectId,
+      status: "in-review",
+      number: { $ne: page.number }
+    });
+  }
+
   // Check if page with this number already exists
   const existing = await Page.findOne({ bookId: projectId, number: page.number });
   if (existing) {
-    await Page.findByIdAndUpdate(existing._id, page, { returnDocument: 'after' });
+    console.log(`[DB] Updating existing page ${page.number}`);
+    await Page.findByIdAndUpdate(existing._id, {
+      ...page,
+      generatedAt: new Date(),
+    }, { returnDocument: 'after' });
   } else {
+    console.log(`[DB] Creating new page ${page.number}`);
     await Page.create({
       bookId: projectId,
       ...page,

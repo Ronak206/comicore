@@ -420,7 +420,19 @@ export async function generateNextPage(
   const project = await getProject(projectId);
   if (!project) throw new Error("Project not found");
 
-  const nextPageNum = project.pages.length + 1;
+  // Count only APPROVED pages to determine next page number
+  const approvedPages = project.pages.filter((p) => p.status === "approved");
+  const nextPageNum = approvedPages.length + 1;
+
+  console.log(`[Story Engine] Generating page ${nextPageNum} of ${project.pageGoal}`);
+  console.log(`[Story Engine] Total approved pages: ${approvedPages.length}`);
+  console.log(`[Story Engine] Total pages in DB: ${project.pages.length}`);
+
+  // Clean up any in-review pages for this page number (in case of regeneration)
+  const existingInReview = project.pages.find(p => p.number === nextPageNum && p.status === "in-review");
+  if (existingInReview) {
+    console.log(`[Story Engine] Found existing in-review page ${nextPageNum}, will be replaced`);
+  }
 
   // Determine which chapter this page falls in
   const currentChapter = project.chapters.find((ch) => {
@@ -432,16 +444,32 @@ export async function generateNextPage(
     ? `Current Chapter: "${currentChapter.title}" — ${currentChapter.description}`
     : "No chapter context available.";
 
-  const approvedPages = project.pages.filter((p) => p.status === "approved");
-  const history = buildPageHistory(approvedPages, 3);
+  // Build history of approved page scripts for context
+  const history = buildPageHistory(approvedPages, 5);
+
+  // Build summary of all approved pages for comprehensive context
+  const approvedPagesSummary = approvedPages.map(p => 
+    `Page ${p.number}: ${p.title} - ${p.script?.substring(0, 200)}...`
+  ).join("\n");
 
   const characterSummary = project.characters
     .map((c) => `${c.name} (${c.role}): ${c.appearance}. Personality: ${c.personality}`)
     .join("\n");
 
-  // Use pipeline: Claude writes, Gemini validates
+  // Get page index context for current page
+  const currentPageIndex = project.pageIndex?.find(p => p.pageNumber === nextPageNum);
+  const pageIndexInfo = currentPageIndex 
+    ? `\nPLANNED PAGE CONTENT:\n- Title: ${currentPageIndex.title}\n- Description: ${currentPageIndex.description}\n- Key Events: ${currentPageIndex.keyEvents?.join(', ') || 'None specified'}`
+    : "";
+
+  // Build world rules context
+  const worldRulesContext = project.world.rules 
+    ? `\nWORLD RULES (MUST NOT VIOLATE):\n${project.world.rules}`
+    : "";
+
+  // Build comprehensive prompt with all context
   const req: AIRequest = {
-    system: `You are an expert comic book scriptwriter. Write a detailed page-by-page script for page ${nextPageNum} of "${project.title}".
+    system: `You are an expert comic book scriptwriter. Write a detailed page script for page ${nextPageNum} of "${project.title}".
 
 RULES:
 - Art style: ${project.style.artStyle}
@@ -449,6 +477,8 @@ RULES:
 - Narration style: ${project.style.narrationStyle}
 - Detail level: ${project.style.detailLevel}
 - ${project.style.referenceNotes ? `Visual references: ${project.style.referenceNotes}` : ""}
+
+IMPORTANT: This is page ${nextPageNum} of ${project.pageGoal}. Continue the story naturally from where the previous pages left off.
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -470,19 +500,24 @@ Create ${project.style.panelDensity === "sparse" ? "1-3" : project.style.panelDe
 PAGE: ${nextPageNum} of ${project.pageGoal}
 ${chapterContext}
 
-CHARACTERS:
-${characterSummary}
+=== CHARACTERS ===
+${characterSummary || "No characters defined."}
 
-WORLD:
-${project.world.setting}
-${project.world.atmosphere}
+=== WORLD SETTING ===
+${project.world.setting || "Not defined"}
+Atmosphere: ${project.world.atmosphere || "Not defined"}
+${worldRulesContext}
 
-STORY OVERVIEW:
+=== STORY OVERVIEW ===
 ${project.roughOverview}
+${pageIndexInfo}
 
-${userInstructions ? `USER INSTRUCTIONS FOR THIS PAGE:\n${userInstructions}\n` : ""}
+=== PREVIOUS PAGES SUMMARY ===
+${approvedPages.length > 0 ? approvedPagesSummary : "This is the first page - establish the setting and introduce key characters."}
 
-Write page ${nextPageNum}. Return ONLY JSON.`,
+${userInstructions ? `=== USER INSTRUCTIONS FOR THIS PAGE ===\n${userInstructions}\n` : ""}
+
+Write page ${nextPageNum}. Continue the story naturally. Return ONLY JSON.`,
     history,
   };
 
@@ -490,19 +525,8 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
   const claudeContent = extractClaudeContent(pipelineResponse);
   let validation = extractGeminiValidation(pipelineResponse);
 
-  // Get page index context for current page
-  const currentPageIndex = project.pageIndex?.find(p => p.pageNumber === nextPageNum);
-  const pageIndexContext = currentPageIndex 
-    ? `PLANNED CONTENT FOR THIS PAGE:\nTitle: ${currentPageIndex.title}\nDescription: ${currentPageIndex.description}\nKey Events: ${currentPageIndex.keyEvents?.join(', ') || 'None specified'}`
-    : "";
-
-  // Build world rules context
-  const worldRulesContext = project.world.rules 
-    ? `WORLD RULES (MUST NOT VIOLATE):\n${project.world.rules}`
-    : "";
-
   // Always run comprehensive validation using aiMemory for better context
-  console.log("Running comprehensive Gemini validation...");
+  console.log("[Story Engine] Running comprehensive validation...");
   
   const validationReq: AIRequest = {
     system: `You are a comic book editor and continuity expert. Review the generated page content thoroughly.
@@ -510,7 +534,7 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
 VALIDATION CHECKLIST:
 1. CHARACTER CONSISTENCY: Do characters act according to their defined personalities and appearances?
 2. WORLD RULES: Does the content violate any established world rules?
-3. PLOT COHERENCE: Does this page fit the story flow and planned content?
+3. PLOT COHERENCE: Does this page fit the story flow and continue from previous pages?
 4. VISUAL CLARITY: Can the panels be clearly visualized by an artist?
 5. DIALOGUE QUALITY: Is the dialogue natural, engaging, and character-appropriate?
 6. TIMELINE ACCURACY: Are events consistent with the story timeline?
@@ -522,24 +546,27 @@ Respond in this format:
     user: `COMIC: ${project.title}
 PAGE ${nextPageNum} of ${project.pageGoal}
 
-${pageIndexContext}
+${pageIndexInfo}
 
 ${worldRulesContext}
 
-CHARACTERS:
-${characterSummary}
+=== CHARACTERS ===
+${characterSummary || "No characters defined."}
 
-WORLD SETTING:
-${project.world.setting}
-${project.world.atmosphere}
+=== WORLD SETTING ===
+${project.world.setting || "Not defined"}
+Atmosphere: ${project.world.atmosphere || "Not defined"}
 
-STORY OVERVIEW:
+=== STORY OVERVIEW ===
 ${project.roughOverview}
 
-GENERATED PAGE CONTENT (JSON):
+=== PREVIOUS PAGES (for continuity) ===
+${approvedPages.length > 0 ? approvedPagesSummary : "This is the first page."}
+
+=== GENERATED PAGE CONTENT ===
 ${claudeContent}
 
-Validate this page content against the checklist above.`,
+Validate this page content against the checklist above. Check for continuity with previous pages.`,
   };
   
   try {
