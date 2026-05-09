@@ -85,6 +85,10 @@ interface ProjectData {
     title: string;
     description: string;
     chapter: string;
+    chapterNumber: number;
+    chapterTitle: string;
+    chapterStartPage: number;
+    chapterEndPage: number;
     keyEvents: string[];
   }>;
   pages: Array<{
@@ -144,6 +148,10 @@ export default function ComicWorkspacePage() {
     title: string;
     description: string;
     chapter: string;
+    chapterNumber: number;
+    chapterTitle: string;
+    chapterStartPage: number;
+    chapterEndPage: number;
     keyEvents: string[];
   }>>([]);
 
@@ -820,6 +828,52 @@ export default function ComicWorkspacePage() {
       {/* ========== PAGE INDEX TAB ========== */}
       {activeTab === "pageIndex" && project && (
         <div className="space-y-5">
+          {/* Chapter Breakdown Section */}
+          {hasPageIndex && project.chapters && project.chapters.length > 0 && (
+            <div className="bg-[#111] border border-[#222] p-6">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
+                Chapter Breakdown
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {project.chapters.map((ch) => {
+                  // Calculate progress within this chapter
+                  const startPage = parseInt(ch.pageRange.split("-")[0]) || 1;
+                  const endPage = parseInt(ch.pageRange.split("-")[1]) || project.pageGoal;
+                  const pagesInChapter = endPage - startPage + 1;
+                  
+                  return (
+                    <div key={ch.id} className="bg-[#0A0A0A] border border-[#222] p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 bg-[#E8B931]/10 text-[#E8B931] text-xs font-bold flex items-center justify-center">
+                            {ch.number}
+                          </span>
+                          <span className="text-sm font-bold text-[#F5F5F0]">{ch.title}</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-[#666] mb-2 line-clamp-2">{ch.description}</p>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-[#E8B931]">
+                          Pages {startPage}-{endPage}
+                        </span>
+                        <span className="text-[#555]">
+                          {pagesInChapter} page{pagesInChapter !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      {/* Chapter progress bar */}
+                      <div className="mt-2 h-1 bg-[#222]">
+                        <div 
+                          className="h-full bg-[#E8B931]/50" 
+                          style={{ width: `${(pagesInChapter / project.pageGoal) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
           <div className="bg-[#111] border border-[#222] p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
@@ -836,41 +890,70 @@ export default function ComicWorkspacePage() {
             </div>
 
             <p className="text-xs text-[#555] mb-4">
-              This index shows all planned pages. Review it to ensure the story flow is correct before generating actual pages.
+              This index shows all planned pages organized by chapters. Review it to ensure the story flow is correct before generating actual pages.
             </p>
 
             {generatingIndex ? (
               <div className="flex flex-col items-center justify-center py-12 gap-4">
                 <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
-                <p className="text-sm text-[#666]">Claude is planning your page index...</p>
+                <p className="text-sm text-[#666]">Generating chapters and page index...</p>
               </div>
             ) : hasPageIndex ? (
-              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-                {pageIndex.map((page) => (
-                  <div key={page.pageNumber} className="flex items-start gap-4 p-3 bg-[#0A0A0A] border border-[#222] hover:border-[#333] transition-colors">
-                    <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center flex-shrink-0">
-                      {page.pageNumber}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-[#F5F5F0] truncate">{page.title}</span>
-                        <span className="text-[10px] text-[#555] border border-[#333] px-2 py-0.5 flex-shrink-0">
-                          {page.chapter}
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                {/* Group pages by chapter */}
+                {(() => {
+                  // Group pages by chapter number
+                  const chapterGroups = new Map<number, typeof pageIndex>();
+                  pageIndex.forEach((page) => {
+                    const chapterNum = page.chapterNumber || 1;
+                    if (!chapterGroups.has(chapterNum)) {
+                      chapterGroups.set(chapterNum, []);
+                    }
+                    chapterGroups.get(chapterNum)!.push(page);
+                  });
+                  
+                  // Render each chapter group
+                  return Array.from(chapterGroups.entries()).map(([chapterNum, pages]) => (
+                    <div key={chapterNum} className="border border-[#222]">
+                      {/* Chapter header */}
+                      <div className="bg-[#0A0A0A] px-4 py-2 border-b border-[#222] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-[#E8B931]">
+                            Chapter {chapterNum}
+                          </span>
+                          <span className="text-sm text-[#F5F5F0]">{pages[0]?.chapterTitle || ""}</span>
+                        </div>
+                        <span className="text-[10px] text-[#555]">
+                          Pages {pages[0]?.chapterStartPage}-{pages[0]?.chapterEndPage} ({pages.length} pages)
                         </span>
                       </div>
-                      <p className="text-xs text-[#666] mt-1 leading-relaxed">{page.description}</p>
-                      {page.keyEvents && page.keyEvents.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          {page.keyEvents.map((event, i) => (
-                            <span key={i} className="text-[10px] text-[#E8B931]/70 bg-[#E8B931]/5 px-1.5 py-0.5 border border-[#E8B931]/20">
-                              {event}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      
+                      {/* Pages in this chapter */}
+                      <div className="divide-y divide-[#222]">
+                        {pages.map((page) => (
+                          <div key={page.pageNumber} className="flex items-start gap-4 p-3 bg-[#0A0A0A] hover:bg-[#111] transition-colors">
+                            <div className="w-8 h-8 bg-[#E8B931]/10 text-[#E8B931] text-xs font-bold flex items-center justify-center flex-shrink-0">
+                              {page.pageNumber}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-bold text-[#F5F5F0] truncate block">{page.title}</span>
+                              <p className="text-xs text-[#666] mt-1 leading-relaxed">{page.description}</p>
+                              {page.keyEvents && page.keyEvents.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {page.keyEvents.map((event, i) => (
+                                    <span key={i} className="text-[10px] text-[#E8B931]/70 bg-[#E8B931]/5 px-1.5 py-0.5 border border-[#E8B931]/20">
+                                      {event}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             ) : hasOverview ? (
               <div className="text-center py-12">
@@ -895,10 +978,14 @@ export default function ComicWorkspacePage() {
           {hasPageIndex && (
             <div className="bg-[#111] border border-[#222] p-5">
               <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-3">Summary</h3>
-              <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                 <div>
                   <div className="text-2xl font-black text-[#F5F5F0]">{pageIndex.length}</div>
                   <div className="text-[10px] text-[#555] uppercase tracking-wider">Total Pages</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{project.chapters?.length || 0}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Chapters</div>
                 </div>
                 <div>
                   <div className="text-2xl font-black text-[#F5F5F0]">{project.characters.length}</div>

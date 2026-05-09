@@ -28,6 +28,10 @@ export interface IPageIndexItem {
   title: string;
   description: string;
   chapter: string;
+  chapterNumber: number;
+  chapterTitle: string;
+  chapterStartPage: number;
+  chapterEndPage: number;
   keyEvents: string[];
 }
 
@@ -83,6 +87,10 @@ const PageIndexItemSchema = new Schema<IPageIndexItem>({
   title: { type: String, required: true },
   description: { type: String, default: "" },
   chapter: { type: String, default: "Main" },
+  chapterNumber: { type: Number, default: 1 },
+  chapterTitle: { type: String, default: "" },
+  chapterStartPage: { type: Number, default: 1 },
+  chapterEndPage: { type: Number, default: 1 },
   keyEvents: { type: [String], default: [] },
 });
 

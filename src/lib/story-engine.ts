@@ -256,7 +256,7 @@ Break this into chapters and story beats. Return ONLY JSON.`,
 }
 
 // ─── AI: Generate Page Index ───────────────────────
-// Generates page index BEFORE chapters - based on story overview only
+// Generates chapters WITH page ranges and page index based on story overview
 
 export async function generatePageIndex(projectId: string): Promise<{
   pageIndex: Array<{
@@ -264,7 +264,19 @@ export async function generatePageIndex(projectId: string): Promise<{
     title: string;
     description: string;
     chapter: string;
+    chapterNumber: number;
+    chapterTitle: string;
+    chapterStartPage: number;
+    chapterEndPage: number;
     keyEvents: string[];
+  }>;
+  chapters: Array<{
+    id: string;
+    number: number;
+    title: string;
+    description: string;
+    pageRange: string;
+    pageCount: number;
   }>;
   project: ProjectData;
 }> {
@@ -289,38 +301,44 @@ export async function generatePageIndex(projectId: string): Promise<{
     .map((c) => `${c.name} (${c.role})`)
     .join(", ");
 
-  // Use chapters if available, otherwise generate without chapter context
-  const chapterSummary = project.chapters?.length > 0
-    ? project.chapters.map((ch) => `Chapter ${ch.number}: "${ch.title}" (Pages ${ch.pageRange}) - ${ch.description}`).join("\n")
-    : "Chapters will be generated after page index approval.";
-
-  const hasChapters = project.chapters?.length > 0;
-
+  // Generate chapters and page index together with explicit page ranges
   const req: AIRequest = {
-    system: `You are a comic story planner. Create a detailed page-by-page index for a ${project.pageGoal}-page comic.
-This index will be shown to the user for approval before generating the actual pages.
+    system: `You are a comic story planner. Create a detailed chapter breakdown AND page-by-page index for a ${project.pageGoal}-page comic.
+
+IMPORTANT: First divide the story into chapters, then assign pages to each chapter. Each chapter must have explicit start and end page numbers.
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
+  "chapters": [
+    {
+      "number": 1,
+      "title": "Chapter Title",
+      "description": "Brief description of the chapter",
+      "startPage": 1,
+      "endPage": 8
+    }
+  ],
   "pageIndex": [
     {
       "pageNumber": 1,
       "title": "Page Title",
       "description": "Brief description of what happens on this page",
-      "chapter": "Act 1",
+      "chapterNumber": 1,
       "keyEvents": ["Event 1", "Event 2"]
     }
   ]
 }
 
-Important rules:
-- Create exactly ${project.pageGoal} pages
-- Each page should have a unique title and description
-- ${hasChapters ? "Map pages to their respective chapters" : "Divide pages into logical acts (Act 1, Act 2, Act 3, etc.) based on story structure"}
+Critical rules:
+- Create exactly ${project.pageGoal} pages total
+- Each chapter MUST have startPage and endPage (inclusive)
+- Chapter page ranges MUST be continuous (no gaps, no overlaps)
+- First chapter starts at page 1, last chapter ends at page ${project.pageGoal}
+- Typical chapter sizes: 4-10 pages (vary naturally)
+- Each page MUST have a chapterNumber that matches a chapter
 - Include 1-3 key events per page
-- Ensure story flows logically from beginning to end
-- Start with an opening page that sets the scene
-- End with a climactic or resolution page`,
+- Ensure story flows logically: setup → conflict → climax → resolution
+- First page should set the scene, last page should be climactic/resolution`,
     user: `COMIC: ${project.title}
 GENRE: ${project.genre}
 TONE: ${project.tone}
@@ -332,12 +350,10 @@ ${characterSummary || "No characters defined"}
 STORY OVERVIEW:
 ${project.roughOverview}
 
-${hasChapters ? `CHAPTER BREAKDOWN:\n${chapterSummary}` : "Create a natural story flow from beginning to end."}
-
-Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON.`,
+Divide this story into chapters with explicit page ranges, then create a detailed page index. Return ONLY JSON with "chapters" and "pageIndex" arrays.`,
   };
 
-  console.log("[Story Engine] Calling aiThink for page index...");
+  console.log("[Story Engine] Calling aiThink for chapters and page index...");
   const response = await aiThink(req);
   console.log("[Story Engine] aiThink response received");
   
@@ -363,36 +379,90 @@ Create a detailed page index for all ${project.pageGoal} pages. Return ONLY JSON
     }
   }
 
-  const pageIndex = (parsed.pageIndex || []).map((p: any, i: number) => ({
-    pageNumber: p.pageNumber || i + 1,
-    title: p.title || `Page ${i + 1}`,
-    description: p.description || "Story continues...",
-    chapter: p.chapter || "Main",
-    keyEvents: p.keyEvents || [],
+  // Process chapters with page ranges
+  const chapters = (parsed.chapters || []).map((ch: any, i: number) => ({
+    id: `ch_${Date.now()}_${i}`,
+    number: ch.number || i + 1,
+    title: ch.title || `Chapter ${i + 1}`,
+    description: ch.description || "",
+    pageRange: ch.startPage && ch.endPage ? `${ch.startPage}-${ch.endPage}` : "1-1",
+    pageCount: ch.startPage && ch.endPage ? (ch.endPage - ch.startPage + 1) : 1,
+    startPage: ch.startPage,
+    endPage: ch.endPage,
   }));
+
+  console.log("[Story Engine] Parsed", chapters.length, "chapters");
+
+  // Create a map of chapter number to chapter info for quick lookup
+  const chapterMap = new Map<number, typeof chapters[0] & { startPage: number; endPage: number }>();
+  chapters.forEach((ch: any) => {
+    chapterMap.set(ch.number, {
+      ...ch,
+      startPage: ch.startPage || 1,
+      endPage: ch.endPage || project.pageGoal,
+    });
+  });
+
+  // Process page index with chapter information
+  const pageIndex = (parsed.pageIndex || []).map((p: any, i: number) => {
+    const chapterNum = p.chapterNumber || 1;
+    const chapterInfo = chapterMap.get(chapterNum) || { 
+      number: 1, 
+      title: "Main", 
+      startPage: 1, 
+      endPage: project.pageGoal 
+    };
+    
+    return {
+      pageNumber: p.pageNumber || i + 1,
+      title: p.title || `Page ${i + 1}`,
+      description: p.description || "Story continues...",
+      chapter: `Chapter ${chapterNum}: ${chapterInfo.title}`,
+      chapterNumber: chapterNum,
+      chapterTitle: chapterInfo.title,
+      chapterStartPage: chapterInfo.startPage,
+      chapterEndPage: chapterInfo.endPage,
+      keyEvents: p.keyEvents || [],
+    };
+  });
 
   console.log("[Story Engine] Parsed", pageIndex.length, "pages from AI");
 
   // Ensure we have exactly pageGoal pages
   while (pageIndex.length < project.pageGoal) {
     const num = pageIndex.length + 1;
+    // Find which chapter this page belongs to
+    let belongingChapter = chapters.find((ch: any) => num >= ch.startPage && num <= ch.endPage);
+    if (!belongingChapter && chapters.length > 0) {
+      belongingChapter = chapters[chapters.length - 1];
+    }
+    
     pageIndex.push({
       pageNumber: num,
       title: `Page ${num}`,
       description: "Story continues...",
-      chapter: "Main",
+      chapter: belongingChapter ? `Chapter ${belongingChapter.number}: ${belongingChapter.title}` : "Main",
+      chapterNumber: belongingChapter?.number || 1,
+      chapterTitle: belongingChapter?.title || "Main",
+      chapterStartPage: belongingChapter?.startPage || 1,
+      chapterEndPage: belongingChapter?.endPage || project.pageGoal,
       keyEvents: [],
     });
   }
 
   console.log("[Story Engine] Final page count:", pageIndex.length);
+  console.log("[Story Engine] Chapter summary:");
+  chapters.forEach((ch: any) => {
+    console.log(`  Chapter ${ch.number}: "${ch.title}" - Pages ${ch.startPage}-${ch.endPage} (${ch.endPage - ch.startPage + 1} pages)`);
+  });
 
   const updated = await updateProject(projectId, {
     status: "index-ready",
     pageIndex,
+    chapters: chapters.map(({ startPage, endPage, ...ch }: any) => ch), // Remove temp fields before saving
   });
 
-  return { pageIndex, project: updated! };
+  return { pageIndex, chapters, project: updated! };
 }
 
 // ─── AI: Generate Page ───────────────────────────

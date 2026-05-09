@@ -28,13 +28,14 @@ export async function POST(request: NextRequest) {
     console.log("[Page Index API] Project found:", project.title, "Page goal:", project.pageGoal);
     console.log("[Page Index API] Rough overview length:", project.roughOverview?.length || 0);
     
-    const { pageIndex } = await generatePageIndex(body.projectId);
-    console.log("[Page Index API] Generated", pageIndex.length, "pages");
+    const { pageIndex, chapters } = await generatePageIndex(body.projectId);
+    console.log("[Page Index API] Generated", pageIndex.length, "pages in", chapters.length, "chapters");
 
     return NextResponse.json({
       success: true,
       data: {
         pageIndex,
+        chapters,
         projectId: project.id,
         total_pages: project.pageGoal,
       },
