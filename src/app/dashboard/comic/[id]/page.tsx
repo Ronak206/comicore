@@ -85,10 +85,10 @@ interface ProjectData {
     title: string;
     description: string;
     chapter: string;
-    chapterNumber: number;
-    chapterTitle: string;
-    chapterStartPage: number;
-    chapterEndPage: number;
+    chapterNumber?: number;
+    chapterTitle?: string;
+    chapterStartPage?: number;
+    chapterEndPage?: number;
     keyEvents: string[];
   }>;
   pages: Array<{
@@ -148,10 +148,10 @@ export default function ComicWorkspacePage() {
     title: string;
     description: string;
     chapter: string;
-    chapterNumber: number;
-    chapterTitle: string;
-    chapterStartPage: number;
-    chapterEndPage: number;
+    chapterNumber?: number;
+    chapterTitle?: string;
+    chapterStartPage?: number;
+    chapterEndPage?: number;
     keyEvents: string[];
   }>>([]);
 
@@ -913,7 +913,13 @@ export default function ComicWorkspacePage() {
                   });
                   
                   // Render each chapter group
-                  return Array.from(chapterGroups.entries()).map(([chapterNum, pages]) => (
+                  return Array.from(chapterGroups.entries()).map(([chapterNum, pages]) => {
+                    const firstPage = pages[0];
+                    const chapterTitle = firstPage?.chapterTitle || "";
+                    const chapterStartPage = firstPage?.chapterStartPage || pages[0]?.pageNumber || 1;
+                    const chapterEndPage = firstPage?.chapterEndPage || pages[pages.length - 1]?.pageNumber || pages.length;
+                    
+                    return (
                     <div key={chapterNum} className="border border-[#222]">
                       {/* Chapter header */}
                       <div className="bg-[#0A0A0A] px-4 py-2 border-b border-[#222] flex items-center justify-between">
@@ -921,10 +927,10 @@ export default function ComicWorkspacePage() {
                           <span className="text-xs font-bold text-[#E8B931]">
                             Chapter {chapterNum}
                           </span>
-                          <span className="text-sm text-[#F5F5F0]">{pages[0]?.chapterTitle || ""}</span>
+                          <span className="text-sm text-[#F5F5F0]">{chapterTitle}</span>
                         </div>
                         <span className="text-[10px] text-[#555]">
-                          Pages {pages[0]?.chapterStartPage}-{pages[0]?.chapterEndPage} ({pages.length} pages)
+                          Pages {chapterStartPage}-{chapterEndPage} ({pages.length} pages)
                         </span>
                       </div>
                       
@@ -952,8 +958,8 @@ export default function ComicWorkspacePage() {
                         ))}
                       </div>
                     </div>
-                  ));
-                })()}
+                  );})}
+                )()}
               </div>
             ) : hasOverview ? (
               <div className="text-center py-12">

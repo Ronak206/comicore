@@ -28,10 +28,10 @@ export interface IPageIndexItem {
   title: string;
   description: string;
   chapter: string;
-  chapterNumber: number;
-  chapterTitle: string;
-  chapterStartPage: number;
-  chapterEndPage: number;
+  chapterNumber?: number;
+  chapterTitle?: string;
+  chapterStartPage?: number;
+  chapterEndPage?: number;
   keyEvents: string[];
 }
 
