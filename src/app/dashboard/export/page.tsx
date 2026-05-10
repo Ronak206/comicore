@@ -109,10 +109,17 @@ export default function ExportPage() {
 
     try {
       let endpoint = "/api/export/pdf";
+      let filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+      let mimeType = "application/pdf";
+      
       if (selectedFormat === "cbz") {
         endpoint = "/api/export/cbz";
+        filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}.cbz`;
+        mimeType = "application/vnd.comicbook+zip";
       } else if (selectedFormat === "images") {
         endpoint = "/api/export/images";
+        filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}-pages.zip`;
+        mimeType = "application/zip";
       }
       
       const res = await fetch(endpoint, {
@@ -130,29 +137,50 @@ export default function ExportPage() {
         }),
       });
       
-      const data = await res.json();
+      // Check if response is a file or JSON error
+      const contentType = res.headers.get("content-type") || "";
       
-      if (data.success) {
-        // Add to export history
-        const newExport: ExportRecord = {
-          id: `export_${Date.now()}`,
-          projectId: selectedProject.id,
-          comicTitle: selectedProject.title,
-          format: selectedFormat.toUpperCase(),
-          pages: selectedProject.pages,
-          size: data.data.estimatedSize || "Calculating...",
-          date: "Just now",
-          status: "completed",
-        };
-        setExportHistory((prev) => [newExport, ...prev]);
-        
-        // In production, trigger download
-        if (data.data.downloadUrl) {
-          window.open(data.data.downloadUrl, "_blank");
+      if (contentType.includes("application/json")) {
+        // Handle JSON response (likely an error)
+        const data = await res.json();
+        if (!data.success) {
+          setError(data.error || "Export failed");
+          return;
         }
-      } else {
-        setError(data.error || "Export failed");
       }
+      
+      if (!res.ok) {
+        setError("Export failed. Please try again.");
+        return;
+      }
+      
+      // Get the file blob
+      const blob = await res.blob();
+      const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
+      
+      // Create download link and trigger download
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      // Add to export history
+      const newExport: ExportRecord = {
+        id: `export_${Date.now()}`,
+        projectId: selectedProject.id,
+        comicTitle: selectedProject.title,
+        format: selectedFormat.toUpperCase(),
+        pages: selectedProject.pages,
+        size: `${sizeMB} MB`,
+        date: "Just now",
+        status: "completed",
+      };
+      setExportHistory((prev) => [newExport, ...prev]);
+      
     } catch (err: any) {
       setError(err.message || "Export failed");
     } finally {
