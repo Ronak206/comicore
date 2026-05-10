@@ -3,19 +3,46 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Zap, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Zap, ArrowLeft, Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    router.push("/dashboard");
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        router.push("/dashboard");
+      } else {
+        setError(data.error || "Login failed. Please try again.");
+      }
+    } catch (err) {
+      setError("An error occurred. Please try again.");
+      console.error("Login error:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -100,6 +127,13 @@ export default function LoginPage() {
               </p>
             </div>
 
+            {/* Error message */}
+            {error && (
+              <div className="p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Email */}
@@ -112,7 +146,9 @@ export default function LoginPage() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   placeholder="you@example.com"
-                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors"
+                  required
+                  disabled={loading}
+                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors disabled:opacity-50"
                 />
               </div>
 
@@ -127,7 +163,9 @@ export default function LoginPage() {
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="Enter your password"
-                    className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors pr-12"
+                    required
+                    disabled={loading}
+                    className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors pr-12 disabled:opacity-50"
                   />
                   <button
                     type="button"
@@ -149,9 +187,17 @@ export default function LoginPage() {
               {/* Submit */}
               <button
                 type="submit"
-                className="w-full py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-sm"
+                disabled={loading}
+                className="w-full py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-sm disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                Log In
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Logging in...
+                  </>
+                ) : (
+                  "Log In"
+                )}
               </button>
             </form>
 
@@ -168,8 +214,8 @@ export default function LoginPage() {
             {/* Social */}
             <button
               type="button"
-              onClick={() => router.push("/dashboard")}
-              className="w-full py-3 border border-[#333] text-sm text-[#F5F5F0] flex items-center justify-center gap-3 tracking-wide"
+              disabled={loading}
+              className="w-full py-3 border border-[#333] text-sm text-[#F5F5F0] flex items-center justify-center gap-3 tracking-wide disabled:opacity-50"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>

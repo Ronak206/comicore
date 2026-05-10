@@ -3,21 +3,75 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Zap, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Zap, ArrowLeft, Eye, EyeOff, Loader2, CheckCircle } from "lucide-react";
 
 export default function SignUpPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
     confirmPassword: "",
+    terms: false,
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const passwordRequirements = [
+    { label: "At least 8 characters", met: formData.password.length >= 8 },
+    { label: "Contains a number", met: /\d/.test(formData.password) },
+    { label: "Contains uppercase letter", met: /[A-Z]/.test(formData.password) },
+  ];
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    router.push("/dashboard");
+    setError(null);
+
+    // Validate passwords match
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    // Validate password requirements
+    if (!passwordRequirements.every((r) => r.met)) {
+      setError("Password does not meet all requirements");
+      return;
+    }
+
+    // Validate terms
+    if (!formData.terms) {
+      setError("Please accept the terms and conditions");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        router.push("/dashboard");
+      } else {
+        setError(data.error || "Registration failed. Please try again.");
+      }
+    } catch (err) {
+      setError("An error occurred. Please try again.");
+      console.error("Registration error:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -93,6 +147,13 @@ export default function SignUpPage() {
               </p>
             </div>
 
+            {/* Error message */}
+            {error && (
+              <div className="p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Name */}
@@ -105,7 +166,9 @@ export default function SignUpPage() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="Your name"
-                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors"
+                  required
+                  disabled={loading}
+                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors disabled:opacity-50"
                 />
               </div>
 
@@ -119,7 +182,9 @@ export default function SignUpPage() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   placeholder="you@example.com"
-                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors"
+                  required
+                  disabled={loading}
+                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors disabled:opacity-50"
                 />
               </div>
 
@@ -134,7 +199,9 @@ export default function SignUpPage() {
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="Min 8 characters"
-                    className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors pr-12"
+                    required
+                    disabled={loading}
+                    className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors pr-12 disabled:opacity-50"
                   />
                   <button
                     type="button"
@@ -144,6 +211,22 @@ export default function SignUpPage() {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                
+                {/* Password requirements */}
+                {formData.password && (
+                  <div className="flex flex-wrap gap-3 mt-2">
+                    {passwordRequirements.map((req, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-xs">
+                        <CheckCircle
+                          className={`w-3 h-3 ${req.met ? "text-green-500" : "text-[#444]"}`}
+                        />
+                        <span className={req.met ? "text-green-400" : "text-[#666]"}>
+                          {req.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Confirm Password */}
@@ -156,13 +239,29 @@ export default function SignUpPage() {
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                   placeholder="Repeat your password"
-                  className="w-full px-4 py-3 bg-[#111] border border-[#222] text-[#F5F5F0] text-sm placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none transition-colors"
+                  required
+                  disabled={loading}
+                  className={`w-full px-4 py-3 bg-[#111] border text-[#F5F5F0] text-sm placeholder:text-[#444] focus:outline-none transition-colors disabled:opacity-50 ${
+                    formData.confirmPassword && formData.password !== formData.confirmPassword
+                      ? "border-red-500"
+                      : formData.confirmPassword && formData.password === formData.confirmPassword
+                      ? "border-green-500"
+                      : "border-[#222] focus:border-[#E8B931]"
+                  }`}
                 />
+                {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                  <p className="text-xs text-red-400">Passwords do not match</p>
+                )}
               </div>
 
               {/* Terms */}
               <div className="flex items-start gap-3 pt-2">
-                <input type="checkbox" className="mt-1 accent-[#E8B931]" />
+                <input
+                  type="checkbox"
+                  checked={formData.terms}
+                  onChange={(e) => setFormData({ ...formData, terms: e.target.checked })}
+                  className="mt-1 accent-[#E8B931]"
+                />
                 <p className="text-xs text-[#666] leading-relaxed">
                   I agree to the{" "}
                   <a href="#" className="text-[#E8B931] underline">Terms of Service</a>{" "}
@@ -174,9 +273,17 @@ export default function SignUpPage() {
               {/* Submit */}
               <button
                 type="submit"
-                className="w-full py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-sm"
+                disabled={loading}
+                className="w-full py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-sm disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                Create Account
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Creating Account...
+                  </>
+                ) : (
+                  "Create Account"
+                )}
               </button>
             </form>
 
@@ -193,8 +300,8 @@ export default function SignUpPage() {
             {/* Social */}
             <button
               type="button"
-              onClick={() => router.push("/dashboard")}
-              className="w-full py-3 border border-[#333] text-sm text-[#F5F5F0] flex items-center justify-center gap-3 tracking-wide"
+              disabled={loading}
+              className="w-full py-3 border border-[#333] text-sm text-[#F5F5F0] flex items-center justify-center gap-3 tracking-wide disabled:opacity-50"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>

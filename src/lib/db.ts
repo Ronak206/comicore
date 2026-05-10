@@ -23,10 +23,14 @@ import type {
   IStoryBeat,
   IArtStyle,
   BookStatus,
+  ICharacter,
+  CharacterRole,
+  IWorld,
+  IPage,
+  IPanel,
+  PageStatus,
+  IPageIndexItem,
 } from "./models/Book";
-import type { ICharacter, CharacterRole } from "./models/Character";
-import type { IWorld } from "./models/World";
-import type { IPanel, PageStatus } from "./models/Page";
 
 // ─── Ensure Connection ──────────────────────────
 
@@ -36,41 +40,6 @@ async function db(): Promise<void> {
 
 // ─── Types (public) ─────────────────────────────
 
-// ─── Clean Data Types (no Mongoose Document fields) ────
-
-export type CharacterData = {
-  id: string;
-  bookId: string;
-  name: string;
-  role: CharacterRole;
-  description: string;
-  appearance: string;
-  personality: string;
-};
-
-export type WorldData = {
-  setting: string;
-  timePeriod: string;
-  atmosphere: string;
-  technology: string;
-  keyLocations: string;
-  rules: string;
-};
-
-export type PageData = {
-  id: string;
-  bookId: string;
-  number: number;
-  title: string;
-  status: PageStatus;
-  panels: IPanel[];
-  script: string;
-  userInstructions?: string;
-  feedback?: string;
-  generatedAt: string;
-  approvedAt?: string;
-};
-
 export type ProjectData = {
   id: string;
   title: string;
@@ -79,12 +48,13 @@ export type ProjectData = {
   tone: string;
   targetAudience: string;
   pageGoal: number;
-  characters: CharacterData[];
-  world: WorldData;
+  characters: ICharacter[];
+  world: IWorld;
   style: IArtStyle;
   storyBeats: IStoryBeat[];
   chapters: IChapter[];
-  pages: PageData[];
+  pages: IPage[];
+  pageIndex: IPageIndexItem[];
   roughOverview: string;
   status: BookStatus;
   currentPage: number;
@@ -136,35 +106,24 @@ async function toProjectData(bookDoc: IBook): Promise<ProjectData> {
     tone: bookDoc.tone,
     targetAudience: bookDoc.targetAudience,
     pageGoal: bookDoc.pageGoal,
-    characters: characters.map((c: any) => ({
+    characters: characters.map((c) => ({
+      ...c,
       id: c._id.toString(),
       bookId: c.bookId.toString(),
-      name: c.name,
-      role: c.role,
-      description: c.description || "",
-      appearance: c.appearance || "",
-      personality: c.personality || "",
     })),
     world,
     style: bookDoc.style,
     storyBeats: bookDoc.storyBeats,
     chapters: bookDoc.chapters,
-    pages: pages.map((p: any) => ({
+    pages: pages.map((p) => ({
+      ...p,
       id: p._id.toString(),
       bookId: p.bookId.toString(),
-      number: p.number,
-      title: p.title,
-      status: p.status,
-      panels: p.panels || [],
-      script: p.script || "",
-      userInstructions: p.userInstructions,
-      feedback: p.feedback,
-      generatedAt: p.generatedAt ? new Date(p.generatedAt).toISOString() : new Date().toISOString(),
-      approvedAt: p.approvedAt ? new Date(p.approvedAt).toISOString() : undefined,
     })),
     roughOverview: bookDoc.roughOverview,
     status: bookDoc.status,
     currentPage: bookDoc.currentPage,
+    pageIndex: bookDoc.pageIndex || [],
     createdAt: bookDoc.createdAt.toISOString(),
     updatedAt: bookDoc.updatedAt.toISOString(),
   };
@@ -244,6 +203,7 @@ export async function updateProject(
     style: Partial<IArtStyle>;
     chapters: IChapter[];
     storyBeats: IStoryBeat[];
+    pageIndex: IPageIndexItem[];
   }>
 ): Promise<ProjectData | null> {
   await db();
@@ -257,7 +217,7 @@ export async function updateProject(
     delete updateFields.style;
   }
 
-  const book = await Book.findByIdAndUpdate(id, updateFields, { new: true });
+  const book = await Book.findByIdAndUpdate(id, updateFields, { returnDocument: 'after' });
   if (!book) return null;
 
   return toProjectData(book);
@@ -294,7 +254,7 @@ export async function addCharacter(
 export async function updateCharacter(
   projectId: string,
   charId: string,
-  updates: Partial<CharacterData>
+  updates: Partial<ICharacter>
 ): Promise<ProjectData | null> {
   await db();
 
@@ -323,7 +283,7 @@ export async function upsertWorld(
   await World.findOneAndUpdate(
     { bookId: projectId },
     { bookId: projectId, ...world },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   );
 
   return getProject(projectId);
@@ -337,11 +297,33 @@ export async function addPage(
 ): Promise<ProjectData | null> {
   await db();
 
+  // Clean up any orphaned in-review pages for this project
+  // (pages that were generated but never approved)
+  const orphanedPages = await Page.find({
+    bookId: projectId,
+    status: "in-review",
+    number: { $ne: page.number } // Keep the current page number if exists
+  });
+  
+  if (orphanedPages.length > 0) {
+    console.log(`[DB] Cleaning up ${orphanedPages.length} orphaned in-review pages`);
+    await Page.deleteMany({
+      bookId: projectId,
+      status: "in-review",
+      number: { $ne: page.number }
+    });
+  }
+
   // Check if page with this number already exists
   const existing = await Page.findOne({ bookId: projectId, number: page.number });
   if (existing) {
-    await Page.findByIdAndUpdate(existing._id, page, { new: true });
+    console.log(`[DB] Updating existing page ${page.number}`);
+    await Page.findByIdAndUpdate(existing._id, {
+      ...page,
+      generatedAt: new Date(),
+    }, { returnDocument: 'after' });
   } else {
+    console.log(`[DB] Creating new page ${page.number}`);
     await Page.create({
       bookId: projectId,
       ...page,

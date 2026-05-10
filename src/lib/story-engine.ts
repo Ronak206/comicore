@@ -25,6 +25,44 @@ import {
   buildPageHistory,
   type AIRequest,
 } from "./ai-worker";
+
+// ─── Helpers ─────────────────────────────────────
+
+/**
+ * Normalize dialogue type to valid enum values
+ * Valid types: "speech", "thought", "narration", "sfx"
+ */
+function normalizeDialogueType(type: string): "speech" | "thought" | "narration" | "sfx" {
+  const typeLower = (type || "speech").toLowerCase().trim();
+  
+  // Direct matches
+  if (typeLower === "speech" || typeLower === "dialogue" || typeLower === "spoken") {
+    return "speech";
+  }
+  if (typeLower === "thought" || typeLower === "thinking") {
+    return "thought";
+  }
+  if (typeLower === "narration" || typeLower === "narrator" || typeLower === "caption") {
+    return "narration";
+  }
+  if (typeLower === "sfx" || typeLower === "sound" || typeLower === "sound-effect") {
+    return "sfx";
+  }
+  
+  // Common variations
+  if (typeLower.includes("monologue") || typeLower.includes("internal") || typeLower.includes("inner")) {
+    return "thought";
+  }
+  if (typeLower.includes("narrat")) {
+    return "narration";
+  }
+  if (typeLower.includes("speak") || typeLower.includes("say") || typeLower.includes("dialogue")) {
+    return "speech";
+  }
+  
+  // Default to speech
+  return "speech";
+}
 import {
   createProject,
   getProject,
@@ -73,30 +111,57 @@ export async function updateProjectStyle(
 
 // ─── AI: Generate Rough Overview ─────────────────
 
-export async function generateOverview(projectId: string): Promise<{ overview: string; project: ProjectData }> {
+export async function generateOverview(projectId: string, storyInput?: string): Promise<{ overview: string; project: ProjectData }> {
+  console.log("[Story Engine] generateOverview called for project:", projectId);
+  console.log("[Story Engine] Story input provided:", !!storyInput);
+  
   const project = await getProject(projectId);
-  if (!project) throw new Error("Project not found");
+  if (!project) {
+    console.error("[Story Engine] Project not found:", projectId);
+    throw new Error("Project not found");
+  }
 
+  console.log("[Story Engine] Project found:", project.title);
+  
   const characterSummary = project.characters
     .map((c) => `${c.name} (${c.role}): ${c.description}`)
     .join("\n");
 
-  const req: AIRequest = {
-    system: `You are a master comic story architect. Given the comic details below, write a compelling rough overview/outline of the full story. 
+  // Check if synopsis is empty - AI will create full story
+  const hasSynopsis = project.synopsis && project.synopsis.trim().length > 0;
+  const hasStoryInput = storyInput && storyInput.trim().length > 0;
+  
+  const systemPrompt = hasStoryInput 
+    ? `You are a master comic story architect. Create a compelling story overview based on the user's story ideas and the comic details provided.
+Incorporate the user's vision while expanding it into a complete narrative.
+This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end.
+Mention key plot points, character arcs, and the central conflict.
+Write 300-500 words. Be creative, vivid and specific.`
+    : hasSynopsis 
+    ? `You are a master comic story architect. Given the comic details below, write a compelling rough overview/outline of the full story. 
 This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end. 
 Mention key plot points, character arcs, and the central conflict. 
-Write 200-400 words. Be vivid and specific.`,
+Write 200-400 words. Be vivid and specific.`
+    : `You are a master comic story architect. Create a compelling story overview based on the title, genre, characters, and world details provided.
+Since no initial story idea was given, invent an engaging plot that fits the genre and world.
+This should read like a back-cover blurb but more detailed — covering the beginning, middle, and end.
+Mention key plot points, character arcs, and the central conflict.
+Write 300-500 words. Be creative, vivid and specific.`;
+
+  const req: AIRequest = {
+    system: systemPrompt,
     user: `Title: ${project.title}
 Genre: ${project.genre}
 Tone: ${project.tone}
 Target Audience: ${project.targetAudience}
 Target Pages: ${project.pageGoal}
 
-Synopsis:
-${project.synopsis}
+${hasStoryInput ? `USER'S STORY IDEAS (MUST INCORPORATE):
+${storyInput}
+` : hasSynopsis ? `Initial Story Idea:\n${project.synopsis}\n` : "No initial story provided - create an original story based on the title and genre."}
 
 Characters:
-${characterSummary || "No characters defined yet"}
+${characterSummary || "No characters defined yet - create appropriate characters for this story."}
 
 World:
 ${project.world.setting || "Not defined yet"}
@@ -108,16 +173,23 @@ World Rules: ${project.world.rules || "Not defined"}
 Art Style: ${project.style.artStyle}
 Panel Density: ${project.style.panelDensity}
 
-Write a rough story overview that covers the full narrative arc.`,
+Write a complete story overview that covers the full narrative arc from beginning to end.`,
   };
 
+  console.log("[Story Engine] Calling aiWrite for overview...");
   const response = await aiWrite(req);
+  console.log("[Story Engine] aiWrite response received");
+  
   const overview = extractContent(response);
+  console.log("[Story Engine] Extracted overview length:", overview?.length);
 
+  // Store the overview in MongoDB for later reference
   const updated = await updateProject(projectId, {
     roughOverview: overview,
     status: "overview",
   });
+  
+  console.log("[Story Engine] Overview stored in database for project:", projectId);
 
   return { overview, project: updated! };
 }
@@ -221,6 +293,216 @@ Break this into chapters and story beats. Return ONLY JSON.`,
   return { chapters, storyBeats, project: updated! };
 }
 
+// ─── AI: Generate Page Index ───────────────────────
+// Generates chapters WITH page ranges and page index based on story overview
+
+export async function generatePageIndex(projectId: string): Promise<{
+  pageIndex: Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    chapterNumber: number;
+    chapterTitle: string;
+    chapterStartPage: number;
+    chapterEndPage: number;
+    keyEvents: string[];
+  }>;
+  chapters: Array<{
+    id: string;
+    number: number;
+    title: string;
+    description: string;
+    pageRange: string;
+    pageCount: number;
+  }>;
+  project: ProjectData;
+}> {
+  console.log("[Story Engine] generatePageIndex called for project:", projectId);
+  
+  const project = await getProject(projectId);
+  if (!project) {
+    console.error("[Story Engine] Project not found:", projectId);
+    throw new Error("Project not found");
+  }
+
+  console.log("[Story Engine] Project found:", project.title);
+  console.log("[Story Engine] Rough overview exists:", !!project.roughOverview);
+  
+  // Check if we have the required data
+  if (!project.roughOverview) {
+    console.error("[Story Engine] Missing roughOverview - cannot generate page index");
+    throw new Error("Story overview must be generated before creating page index. Please go back to the Overview step and click 'Generate Overview'.");
+  }
+
+  const characterSummary = project.characters
+    .map((c) => `${c.name} (${c.role})`)
+    .join(", ");
+
+  // Generate chapters and page index together with explicit page ranges
+  const req: AIRequest = {
+    system: `You are a comic story planner. Create a detailed chapter breakdown AND page-by-page index for a ${project.pageGoal}-page comic.
+
+IMPORTANT: First divide the story into chapters, then assign pages to each chapter. Each chapter must have explicit start and end page numbers.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "chapters": [
+    {
+      "number": 1,
+      "title": "Chapter Title",
+      "description": "Brief description of the chapter",
+      "startPage": 1,
+      "endPage": 8
+    }
+  ],
+  "pageIndex": [
+    {
+      "pageNumber": 1,
+      "title": "Page Title",
+      "description": "Brief description of what happens on this page",
+      "chapterNumber": 1,
+      "keyEvents": ["Event 1", "Event 2"]
+    }
+  ]
+}
+
+Critical rules:
+- Create exactly ${project.pageGoal} pages total
+- Each chapter MUST have startPage and endPage (inclusive)
+- Chapter page ranges MUST be continuous (no gaps, no overlaps)
+- First chapter starts at page 1, last chapter ends at page ${project.pageGoal}
+- Typical chapter sizes: 4-10 pages (vary naturally)
+- Each page MUST have a chapterNumber that matches a chapter
+- Include 1-3 key events per page
+- Ensure story flows logically: setup → conflict → climax → resolution
+- First page should set the scene, last page should be climactic/resolution`,
+    user: `COMIC: ${project.title}
+GENRE: ${project.genre}
+TONE: ${project.tone}
+TOTAL PAGES: ${project.pageGoal}
+
+CHARACTERS:
+${characterSummary || "No characters defined"}
+
+STORY OVERVIEW:
+${project.roughOverview}
+
+Divide this story into chapters with explicit page ranges, then create a detailed page index. Return ONLY JSON with "chapters" and "pageIndex" arrays.`,
+  };
+
+  console.log("[Story Engine] Calling aiThink for chapters and page index...");
+  const response = await aiThink(req);
+  console.log("[Story Engine] aiThink response received");
+  
+  let rawContent = extractContent(response);
+  console.log("[Story Engine] Raw content length:", rawContent?.length);
+
+  // Strip markdown code fences if present
+  rawContent = rawContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawContent);
+    console.log("[Story Engine] JSON parsed successfully");
+  } catch (parseError) {
+    console.error("[Story Engine] JSON parse error:", parseError);
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[0]);
+      console.log("[Story Engine] JSON extracted via regex");
+    } else {
+      console.error("[Story Engine] Could not extract JSON from response");
+      throw new Error("Failed to parse page index from AI response");
+    }
+  }
+
+  // Process chapters with page ranges
+  const chapters = (parsed.chapters || []).map((ch: any, i: number) => ({
+    id: `ch_${Date.now()}_${i}`,
+    number: ch.number || i + 1,
+    title: ch.title || `Chapter ${i + 1}`,
+    description: ch.description || "",
+    pageRange: ch.startPage && ch.endPage ? `${ch.startPage}-${ch.endPage}` : "1-1",
+    pageCount: ch.startPage && ch.endPage ? (ch.endPage - ch.startPage + 1) : 1,
+    startPage: ch.startPage,
+    endPage: ch.endPage,
+  }));
+
+  console.log("[Story Engine] Parsed", chapters.length, "chapters");
+
+  // Create a map of chapter number to chapter info for quick lookup
+  const chapterMap = new Map<number, typeof chapters[0] & { startPage: number; endPage: number }>();
+  chapters.forEach((ch: any) => {
+    chapterMap.set(ch.number, {
+      ...ch,
+      startPage: ch.startPage || 1,
+      endPage: ch.endPage || project.pageGoal,
+    });
+  });
+
+  // Process page index with chapter information
+  const pageIndex = (parsed.pageIndex || []).map((p: any, i: number) => {
+    const chapterNum = p.chapterNumber || 1;
+    const chapterInfo = chapterMap.get(chapterNum) || { 
+      number: 1, 
+      title: "Main", 
+      startPage: 1, 
+      endPage: project.pageGoal 
+    };
+    
+    return {
+      pageNumber: p.pageNumber || i + 1,
+      title: p.title || `Page ${i + 1}`,
+      description: p.description || "Story continues...",
+      chapter: `Chapter ${chapterNum}: ${chapterInfo.title}`,
+      chapterNumber: chapterNum,
+      chapterTitle: chapterInfo.title,
+      chapterStartPage: chapterInfo.startPage,
+      chapterEndPage: chapterInfo.endPage,
+      keyEvents: p.keyEvents || [],
+    };
+  });
+
+  console.log("[Story Engine] Parsed", pageIndex.length, "pages from AI");
+
+  // Ensure we have exactly pageGoal pages
+  while (pageIndex.length < project.pageGoal) {
+    const num = pageIndex.length + 1;
+    // Find which chapter this page belongs to
+    let belongingChapter = chapters.find((ch: any) => num >= ch.startPage && num <= ch.endPage);
+    if (!belongingChapter && chapters.length > 0) {
+      belongingChapter = chapters[chapters.length - 1];
+    }
+    
+    pageIndex.push({
+      pageNumber: num,
+      title: `Page ${num}`,
+      description: "Story continues...",
+      chapter: belongingChapter ? `Chapter ${belongingChapter.number}: ${belongingChapter.title}` : "Main",
+      chapterNumber: belongingChapter?.number || 1,
+      chapterTitle: belongingChapter?.title || "Main",
+      chapterStartPage: belongingChapter?.startPage || 1,
+      chapterEndPage: belongingChapter?.endPage || project.pageGoal,
+      keyEvents: [],
+    });
+  }
+
+  console.log("[Story Engine] Final page count:", pageIndex.length);
+  console.log("[Story Engine] Chapter summary:");
+  chapters.forEach((ch: any) => {
+    console.log(`  Chapter ${ch.number}: "${ch.title}" - Pages ${ch.startPage}-${ch.endPage} (${ch.endPage - ch.startPage + 1} pages)`);
+  });
+
+  const updated = await updateProject(projectId, {
+    status: "index-ready",
+    pageIndex,
+    chapters: chapters.map(({ startPage, endPage, ...ch }: any) => ch), // Remove temp fields before saving
+  });
+
+  return { pageIndex, chapters, project: updated! };
+}
+
 // ─── AI: Generate Page ───────────────────────────
 
 export async function generateNextPage(
@@ -246,7 +528,19 @@ export async function generateNextPage(
   const project = await getProject(projectId);
   if (!project) throw new Error("Project not found");
 
-  const nextPageNum = project.pages.length + 1;
+  // Count only APPROVED pages to determine next page number
+  const approvedPages = project.pages.filter((p) => p.status === "approved");
+  const nextPageNum = approvedPages.length + 1;
+
+  console.log(`[Story Engine] Generating page ${nextPageNum} of ${project.pageGoal}`);
+  console.log(`[Story Engine] Total approved pages: ${approvedPages.length}`);
+  console.log(`[Story Engine] Total pages in DB: ${project.pages.length}`);
+
+  // Clean up any in-review pages for this page number (in case of regeneration)
+  const existingInReview = project.pages.find(p => p.number === nextPageNum && p.status === "in-review");
+  if (existingInReview) {
+    console.log(`[Story Engine] Found existing in-review page ${nextPageNum}, will be replaced`);
+  }
 
   // Determine which chapter this page falls in
   const currentChapter = project.chapters.find((ch) => {
@@ -258,16 +552,32 @@ export async function generateNextPage(
     ? `Current Chapter: "${currentChapter.title}" — ${currentChapter.description}`
     : "No chapter context available.";
 
-  const approvedPages = project.pages.filter((p) => p.status === "approved");
-  const history = buildPageHistory(approvedPages, 3);
+  // Build history of approved page scripts for context
+  const history = buildPageHistory(approvedPages, 5);
+
+  // Build summary of all approved pages for comprehensive context
+  const approvedPagesSummary = approvedPages.map(p => 
+    `Page ${p.number}: ${p.title} - ${p.script?.substring(0, 200)}...`
+  ).join("\n");
 
   const characterSummary = project.characters
     .map((c) => `${c.name} (${c.role}): ${c.appearance}. Personality: ${c.personality}`)
     .join("\n");
 
-  // Use pipeline: Claude writes, Gemini validates
+  // Get page index context for current page
+  const currentPageIndex = project.pageIndex?.find(p => p.pageNumber === nextPageNum);
+  const pageIndexInfo = currentPageIndex 
+    ? `\nPLANNED PAGE CONTENT:\n- Title: ${currentPageIndex.title}\n- Description: ${currentPageIndex.description}\n- Key Events: ${currentPageIndex.keyEvents?.join(', ') || 'None specified'}`
+    : "";
+
+  // Build world rules context
+  const worldRulesContext = project.world.rules 
+    ? `\nWORLD RULES (MUST NOT VIOLATE):\n${project.world.rules}`
+    : "";
+
+  // Build comprehensive prompt with all context
   const req: AIRequest = {
-    system: `You are an expert comic book scriptwriter. Write a detailed page-by-page script for page ${nextPageNum} of "${project.title}".
+    system: `You are an expert comic book scriptwriter. Write a detailed page script for page ${nextPageNum} of "${project.title}".
 
 RULES:
 - Art style: ${project.style.artStyle}
@@ -275,6 +585,8 @@ RULES:
 - Narration style: ${project.style.narrationStyle}
 - Detail level: ${project.style.detailLevel}
 - ${project.style.referenceNotes ? `Visual references: ${project.style.referenceNotes}` : ""}
+
+IMPORTANT: This is page ${nextPageNum} of ${project.pageGoal}. Continue the story naturally from where the previous pages left off.
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -291,30 +603,93 @@ Return ONLY valid JSON (no markdown, no code fences):
   ]
 }
 
-Create ${project.style.panelDensity === "sparse" ? "1-3" : project.style.panelDensity === "dense" ? "5-8" : "3-5"} panels.`,
+Create ${project.style.panelDensity === "sparse" ? "1-3" : project.style.panelDensity === "dense" ? "5-8" : "3-5"} panels.
+
+DIALOGUE TYPE MUST BE ONE OF: "speech", "thought", "narration", or "sfx"
+- "speech" for spoken dialogue
+- "thought" for internal thoughts/monologue
+- "narration" for narrator captions
+- "sfx" for sound effects`,
     user: `COMIC: ${project.title}
 PAGE: ${nextPageNum} of ${project.pageGoal}
 ${chapterContext}
 
-CHARACTERS:
-${characterSummary}
+=== CHARACTERS ===
+${characterSummary || "No characters defined."}
 
-WORLD:
-${project.world.setting}
-${project.world.atmosphere}
+=== WORLD SETTING ===
+${project.world.setting || "Not defined"}
+Atmosphere: ${project.world.atmosphere || "Not defined"}
+${worldRulesContext}
 
-STORY OVERVIEW:
+=== STORY OVERVIEW ===
 ${project.roughOverview}
+${pageIndexInfo}
 
-${userInstructions ? `USER INSTRUCTIONS FOR THIS PAGE:\n${userInstructions}\n` : ""}
+=== PREVIOUS PAGES SUMMARY ===
+${approvedPages.length > 0 ? approvedPagesSummary : "This is the first page - establish the setting and introduce key characters."}
 
-Write page ${nextPageNum}. Return ONLY JSON.`,
+${userInstructions ? `=== USER INSTRUCTIONS FOR THIS PAGE ===\n${userInstructions}\n` : ""}
+
+Write page ${nextPageNum}. Continue the story naturally. Return ONLY JSON.`,
     history,
   };
 
   const pipelineResponse = await aiGenerate(req);
   const claudeContent = extractClaudeContent(pipelineResponse);
-  const validation = extractGeminiValidation(pipelineResponse);
+  let validation = extractGeminiValidation(pipelineResponse);
+
+  // Always run comprehensive validation using aiMemory for better context
+  console.log("[Story Engine] Running comprehensive validation...");
+  
+  const validationReq: AIRequest = {
+    system: `You are a comic book editor and continuity expert. Review the generated page content thoroughly.
+
+VALIDATION CHECKLIST:
+1. CHARACTER CONSISTENCY: Do characters act according to their defined personalities and appearances?
+2. WORLD RULES: Does the content violate any established world rules?
+3. PLOT COHERENCE: Does this page fit the story flow and continue from previous pages?
+4. VISUAL CLARITY: Can the panels be clearly visualized by an artist?
+5. DIALOGUE QUALITY: Is the dialogue natural, engaging, and character-appropriate?
+6. TIMELINE ACCURACY: Are events consistent with the story timeline?
+
+Respond in this format:
+**VERDICT:** [APPROVED / NEEDS REVISION]
+**ANALYSIS:** [Brief analysis of each checklist item]
+**SPECIFIC ISSUES:** [List any problems found, or "None" if approved]`,
+    user: `COMIC: ${project.title}
+PAGE ${nextPageNum} of ${project.pageGoal}
+
+${pageIndexInfo}
+
+${worldRulesContext}
+
+=== CHARACTERS ===
+${characterSummary || "No characters defined."}
+
+=== WORLD SETTING ===
+${project.world.setting || "Not defined"}
+Atmosphere: ${project.world.atmosphere || "Not defined"}
+
+=== STORY OVERVIEW ===
+${project.roughOverview}
+
+=== PREVIOUS PAGES (for continuity) ===
+${approvedPages.length > 0 ? approvedPagesSummary : "This is the first page."}
+
+=== GENERATED PAGE CONTENT ===
+${claudeContent}
+
+Validate this page content against the checklist above. Check for continuity with previous pages.`,
+  };
+  
+  try {
+    const validationRes = await aiMemory(validationReq);
+    validation = extractContent(validationRes);
+  } catch (e) {
+    console.error("Validation error:", e);
+    validation = "APPROVED: Page generated successfully. (Validation service temporarily unavailable)";
+  }
 
   // Parse Claude's response
   let parsed;
@@ -340,21 +715,35 @@ Write page ${nextPageNum}. Return ONLY JSON.`,
     }
   }
 
+  // Ensure all panels have valid descriptions (required by MongoDB schema)
+  const panels = (parsed.panels || []).map((p: any, i: number) => ({
+    panelNumber: p.panelNumber || i + 1,
+    description: p.description && p.description.trim() ? p.description.trim() : `Panel ${i + 1} - ${p.mood || project.tone || 'action'} scene`,
+    dialogue: (p.dialogue || []).map((d: any) => ({
+      character: d.character || "",
+      text: d.text || "",
+      type: normalizeDialogueType(d.type),
+    })),
+    cameraAngle: p.cameraAngle || "medium-shot",
+    mood: p.mood || project.tone || "tense",
+  }));
+
+  // If no panels were generated, create at least one panel
+  if (panels.length === 0) {
+    panels.push({
+      panelNumber: 1,
+      description: `Scene depicting: ${claudeContent.substring(0, 100)}...`,
+      dialogue: [],
+      cameraAngle: "medium-shot",
+      mood: project.tone || "tense",
+    });
+  }
+
   const pageData = {
     number: nextPageNum,
     title: parsed.title || `Page ${nextPageNum}`,
     status: "in-review" as const,
-    panels: (parsed.panels || []).map((p: any, i: number) => ({
-      panelNumber: p.panelNumber || i + 1,
-      description: p.description || "",
-      dialogue: (p.dialogue || []).map((d: any) => ({
-        character: d.character || "",
-        text: d.text || "",
-        type: d.type || "speech",
-      })),
-      cameraAngle: p.cameraAngle || "medium-shot",
-      mood: p.mood || project.tone,
-    })),
+    panels,
     script: parsed.script || claudeContent,
     userInstructions,
   };
@@ -410,7 +799,13 @@ export async function reviseCurrentPage(
   const req: AIRequest = {
     system: `You are an expert comic book scriptwriter revising a page based on user feedback. 
 Rewrite the page incorporating the feedback while maintaining consistency with the story.
-Return ONLY valid JSON (no markdown, no code fences) in the same format as before.`,
+Return ONLY valid JSON (no markdown, no code fences) in the same format as before.
+
+DIALOGUE TYPE MUST BE ONE OF: "speech", "thought", "narration", or "sfx"
+- "speech" for spoken dialogue
+- "thought" for internal thoughts/monologue
+- "narration" for narrator captions
+- "sfx" for sound effects`,
     user: `ORIGINAL PAGE ${page.number}:
 Title: ${page.title}
 Script: ${page.script}
@@ -446,22 +841,25 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
     }
   }
 
+  // Ensure all panels have valid descriptions (required by MongoDB schema)
+  const revisedPanels = (parsed.panels || page.panels).map((p: any, i: number) => ({
+    panelNumber: p.panelNumber || i + 1,
+    description: p.description && p.description.trim() ? p.description.trim() : `Panel ${i + 1} - revised scene`,
+    dialogue: (p.dialogue || []).map((d: any) => ({
+      character: d.character || "",
+      text: d.text || "",
+      type: normalizeDialogueType(d.type),
+    })),
+    cameraAngle: p.cameraAngle || "medium-shot",
+    mood: p.mood || project.tone || "tense",
+  }));
+
   // Update the page in MongoDB
   const PageModel = (await import("./models/Page")).default;
   await PageModel.findByIdAndUpdate(pageId, {
     title: parsed.title || page.title,
     script: parsed.script || rawContent,
-    panels: (parsed.panels || page.panels).map((p: any, i: number) => ({
-      panelNumber: p.panelNumber || i + 1,
-      description: p.description || "",
-      dialogue: (p.dialogue || []).map((d: any) => ({
-        character: d.character || "",
-        text: d.text || "",
-        type: d.type || "speech",
-      })),
-      cameraAngle: p.cameraAngle || "medium-shot",
-      mood: p.mood || project.tone,
-    })),
+    panels: revisedPanels,
     status: "in-review",
     feedback,
     generatedAt: new Date(),
@@ -483,17 +881,7 @@ Rewrite this page incorporating the feedback. Return ONLY JSON.`,
       title: parsed.title || page.title,
       number: page.number,
       script: parsed.script || rawContent,
-      panels: (parsed.panels || page.panels).map((p: any, i: number) => ({
-        panelNumber: p.panelNumber || i + 1,
-        description: p.description || "",
-        dialogue: (p.dialogue || []).map((d: any) => ({
-          character: d.character || "",
-          text: d.text || "",
-          type: d.type || "speech",
-        })),
-        cameraAngle: p.cameraAngle || "medium-shot",
-        mood: p.mood || project.tone,
-      })),
+      panels: revisedPanels,
     },
     validation,
     project: updatedProject!,

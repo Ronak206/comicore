@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   User,
   Palette,
@@ -12,18 +13,32 @@ import {
   Save,
   Camera,
   Trash2,
-  ChevronRight,
+  Loader2,
 } from "lucide-react";
 
 type SettingsTab = "profile" | "appearance" | "generation" | "notifications" | "account";
 
+interface UserData {
+  id: string;
+  name: string;
+  email: string;
+  bio?: string;
+  plan: string;
+  avatar?: string;
+  createdAt?: string;
+}
+
 export default function SettingsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState({
-    name: "John Doe",
-    email: "john@example.com",
-    bio: "Comic creator and storyteller. Building worlds one panel at a time.",
+    name: "",
+    email: "",
+    bio: "",
   });
   const [generation, setGeneration] = useState({
     defaultStyle: "noir-cyberpunk",
@@ -40,9 +55,72 @@ export default function SettingsPage() {
     tips: false,
   });
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  // Fetch user data on mount
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const response = await fetch("/api/auth/me");
+        const data = await response.json();
+        
+        if (data.success && data.user) {
+          setProfile({
+            name: data.user.name || "",
+            email: data.user.email || "",
+            bio: data.user.bio || "",
+          });
+        } else {
+          router.push("/login");
+        }
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+        router.push("/login");
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchUser();
+  }, [router]);
+
+  // Get user initials for avatar
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2) || "U";
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    
+    try {
+      const response = await fetch("/api/auth/update", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profile.name,
+          email: profile.email,
+          bio: profile.bio,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } else {
+        setError(data.error || "Failed to save changes");
+      }
+    } catch (err) {
+      setError("An error occurred while saving");
+      console.error("Save error:", err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const tabs = [
@@ -52,6 +130,14 @@ export default function SettingsPage() {
     { key: "notifications" as SettingsTab, label: "Notifications", icon: Bell },
     { key: "account" as SettingsTab, label: "Account", icon: Shield },
   ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -67,12 +153,29 @@ export default function SettingsPage() {
         </div>
         <button
           onClick={handleSave}
-          className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-xs flex items-center gap-2"
+          disabled={saving}
+          className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-xs flex items-center gap-2 disabled:opacity-50"
         >
-          <Save className="w-3.5 h-3.5" />
-          {saved ? "Saved" : "Save Changes"}
+          {saving ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="w-3.5 h-3.5" />
+              {saved ? "Saved!" : "Save Changes"}
+            </>
+          )}
         </button>
       </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Settings tabs - left */}
@@ -105,8 +208,8 @@ export default function SettingsPage() {
                   Avatar
                 </h3>
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-[#222] flex items-center justify-center text-lg font-bold text-[#E8B931]">
-                    JD
+                  <div className="w-16 h-16 bg-[#E8B931] flex items-center justify-center text-lg font-bold text-[#0A0A0A]">
+                    {getInitials(profile.name)}
                   </div>
                   <div className="space-y-2">
                     <button className="px-4 py-2 border border-[#333] text-xs text-[#F5F5F0] tracking-wide uppercase flex items-center gap-2">
@@ -158,22 +261,23 @@ export default function SettingsPage() {
                     value={profile.bio}
                     onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
                     rows={3}
-                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
+                    placeholder="Tell us about yourself..."
+                    className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none placeholder:text-[#444]"
                   />
                 </div>
 
                 {/* Stats */}
                 <div className="grid grid-cols-3 gap-4 pt-4 border-t border-[#222]">
                   <div>
-                    <div className="text-lg font-black text-[#E8B931]">12</div>
+                    <div className="text-lg font-black text-[#E8B931]">0</div>
                     <div className="text-[10px] text-[#555] tracking-widest uppercase">Comics</div>
                   </div>
                   <div>
-                    <div className="text-lg font-black text-[#E8B931]">147</div>
+                    <div className="text-lg font-black text-[#E8B931]">0</div>
                     <div className="text-[10px] text-[#555] tracking-widest uppercase">Pages</div>
                   </div>
                   <div>
-                    <div className="text-lg font-black text-[#E8B931]">Free</div>
+                    <div className="text-lg font-black text-[#E8B931]">{profile.email ? "Free" : "-"}</div>
                     <div className="text-[10px] text-[#555] tracking-widest uppercase">Plan</div>
                   </div>
                 </div>
@@ -481,21 +585,20 @@ export default function SettingsPage() {
                   <div>
                     <div className="flex justify-between text-xs mb-1">
                       <span className="text-[#666]">Comics</span>
-                      <span className="text-[#F5F5F0]">3 / 3</span>
+                      <span className="text-[#F5F5F0]">0 / 3</span>
                     </div>
                     <div className="w-full h-1.5 bg-[#222]">
-                      <div className="h-full bg-[#E8B931] w-full" />
+                      <div className="h-full bg-[#E8B931] w-0" />
                     </div>
                   </div>
                   <div>
                     <div className="flex justify-between text-xs mb-1">
                       <span className="text-[#666]">Pages</span>
-                      <span className="text-[#F5F5F0]">147 / 50</span>
+                      <span className="text-[#F5F5F0]">0 / 50</span>
                     </div>
                     <div className="w-full h-1.5 bg-[#222]">
-                      <div className="h-full bg-[#C73E1D] w-full" />
+                      <div className="h-full bg-[#E8B931] w-0" />
                     </div>
-                    <div className="text-[10px] text-[#C73E1D] mt-1">Over limit — consider upgrading</div>
                   </div>
                 </div>
               </div>

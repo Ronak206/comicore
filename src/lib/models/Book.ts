@@ -23,6 +23,18 @@ export interface IStoryBeat {
   pageRange: string;
 }
 
+export interface IPageIndexItem {
+  pageNumber: number;
+  title: string;
+  description: string;
+  chapter: string;
+  chapterNumber?: number;
+  chapterTitle?: string;
+  chapterStartPage?: number;
+  chapterEndPage?: number;
+  keyEvents: string[];
+}
+
 export interface IArtStyle {
   artStyle: string;
   colorPalette: string;
@@ -33,7 +45,7 @@ export interface IArtStyle {
   referenceNotes: string;
 }
 
-export type BookStatus = "setup" | "overview" | "chapters" | "generating" | "reviewing" | "complete";
+export type BookStatus = "setup" | "overview" | "index-ready" | "chapters" | "generating" | "reviewing" | "complete";
 
 export interface IBook extends Document {
   userId?: Types.ObjectId;
@@ -49,6 +61,7 @@ export interface IBook extends Document {
   style: IArtStyle;
   chapters: IChapter[];
   storyBeats: IStoryBeat[];
+  pageIndex: IPageIndexItem[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,6 +80,18 @@ const StoryBeatSchema = new Schema<IStoryBeat>({
   title: { type: String, required: true },
   description: { type: String, default: "" },
   pageRange: { type: String, required: true },
+});
+
+const PageIndexItemSchema = new Schema<IPageIndexItem>({
+  pageNumber: { type: Number, required: true },
+  title: { type: String, required: true },
+  description: { type: String, default: "" },
+  chapter: { type: String, default: "Main" },
+  chapterNumber: { type: Number, default: 1 },
+  chapterTitle: { type: String, default: "" },
+  chapterStartPage: { type: Number, default: 1 },
+  chapterEndPage: { type: Number, default: 1 },
+  keyEvents: { type: [String], default: [] },
 });
 
 const ArtStyleSchema = new Schema<IArtStyle>({
@@ -90,7 +115,7 @@ const BookSchema = new Schema<IBook>(
     pageGoal: { type: Number, required: true, default: 24 },
     status: {
       type: String,
-      enum: ["setup", "overview", "chapters", "generating", "reviewing", "complete"],
+      enum: ["setup", "overview", "index-ready", "chapters", "generating", "reviewing", "complete"],
       default: "setup",
     },
     currentPage: { type: Number, default: 0 },
@@ -98,6 +123,7 @@ const BookSchema = new Schema<IBook>(
     style: { type: ArtStyleSchema, default: () => ({}) },
     chapters: { type: [ChapterSchema], default: [] },
     storyBeats: { type: [StoryBeatSchema], default: [] },
+    pageIndex: { type: [PageIndexItemSchema], default: [] },
   },
   { timestamps: true }
 );

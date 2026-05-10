@@ -23,11 +23,13 @@ import {
   Eye,
   SkipForward,
   Send,
+  FileText,
+  RefreshCw,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────
 
-type WorkspaceTab = "generate" | "chapters" | "characters" | "world" | "style";
+type WorkspaceTab = "generate" | "pageIndex" | "chapters" | "characters" | "world" | "style";
 
 interface ProjectData {
   id: string;
@@ -78,6 +80,17 @@ interface ProjectData {
     description: string;
     pageRange: string;
   }>;
+  pageIndex: Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    chapterNumber?: number;
+    chapterTitle?: string;
+    chapterStartPage?: number;
+    chapterEndPage?: number;
+    keyEvents: string[];
+  }>;
   pages: Array<{
     id: string;
     number: number;
@@ -122,6 +135,25 @@ export default function ComicWorkspacePage() {
   const [userInstructions, setUserInstructions] = useState("");
   const [feedback, setFeedback] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
+  
+  // Overview state
+  const [generatingOverview, setGeneratingOverview] = useState(false);
+  const [storyInput, setStoryInput] = useState("");
+  const [showStoryInput, setShowStoryInput] = useState(true);
+  
+  // Page Index state
+  const [generatingIndex, setGeneratingIndex] = useState(false);
+  const [pageIndex, setPageIndex] = useState<Array<{
+    pageNumber: number;
+    title: string;
+    description: string;
+    chapter: string;
+    chapterNumber?: number;
+    chapterTitle?: string;
+    chapterStartPage?: number;
+    chapterEndPage?: number;
+    keyEvents: string[];
+  }>>([]);
 
   // Load project from API
   const loadProject = useCallback(async () => {
@@ -131,6 +163,10 @@ export default function ComicWorkspacePage() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Project not found");
       setProject(data.data);
+      // Set page index from project data
+      if (data.data.pageIndex && data.data.pageIndex.length > 0) {
+        setPageIndex(data.data.pageIndex);
+      }
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -142,6 +178,68 @@ export default function ComicWorkspacePage() {
   useEffect(() => {
     loadProject();
   }, [loadProject]);
+
+  // ─── Generate Overview ─────────────────────────
+  const handleGenerateOverview = async () => {
+    if (!project) return;
+    
+    setGeneratingOverview(true);
+    setError(null);
+    
+    try {
+      const res = await fetch("/api/engine/overview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          projectId: id,
+          storyInput: storyInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      
+      // Reload project to get updated overview
+      await loadProject();
+      setStoryInput("");
+      setShowStoryInput(false);
+    } catch (err: any) {
+      setError(err.message || "Failed to generate overview");
+    } finally {
+      setGeneratingOverview(false);
+    }
+  };
+
+  // ─── Generate Page Index ─────────────────────────
+  const handleGeneratePageIndex = async () => {
+    if (!project) return;
+    
+    setGeneratingIndex(true);
+    setError(null);
+    
+    try {
+      const res = await fetch("/api/engine/page-index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      
+      setPageIndex(data.data.pageIndex);
+      // Reload project to get updated status
+      await loadProject();
+    } catch (err: any) {
+      setError(err.message || "Failed to generate page index");
+    } finally {
+      setGeneratingIndex(false);
+    }
+  };
+
+  // Check if overview exists
+  const hasOverview = project?.roughOverview && project.roughOverview.trim().length > 0;
+  
+  // Check if page index exists
+  const hasPageIndex = pageIndex && pageIndex.length > 0;
 
   // ─── Generate Page ─────────────────────────────
   const handleGeneratePage = async () => {
@@ -190,6 +288,9 @@ export default function ComicWorkspacePage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
+
+      // Reload project to get updated pages count
+      await loadProject();
 
       if (data.data.storyComplete) {
         setGenState("complete");
@@ -241,6 +342,7 @@ export default function ComicWorkspacePage() {
 
   const tabs: { key: WorkspaceTab; label: string; icon: typeof BookOpen }[] = [
     { key: "generate", label: "Generate", icon: Sparkles },
+    { key: "pageIndex", label: "Page Index", icon: BookOpen },
     { key: "chapters", label: "Chapters", icon: LayoutGrid },
     { key: "characters", label: "Characters", icon: Users },
     { key: "world", label: "World", icon: Globe },
@@ -379,34 +481,148 @@ export default function ComicWorkspacePage() {
             </div>
           )}
 
-          {/* Initial generate button */}
+          {/* Initial generate button - Check workflow state */}
           {genState === "idle" && !showInstructions && (
-            <div className="bg-[#111] border border-[#222] p-12 text-center">
-              <Sparkles className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
-              <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Ready to Generate</h3>
-              <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
-                Page {approvedCount + 1} of {totalPages}. The AI will write a detailed page script with panels and dialogue.
-              </p>
-              <p className="text-xs text-[#555] mb-6">
-                You can review each page, give feedback, and approve before moving to the next.
-              </p>
-              <div className="max-w-md mx-auto">
-                <textarea
-                  value={userInstructions}
-                  onChange={(e) => setUserInstructions(e.target.value)}
-                  rows={2}
-                  className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none mb-3"
-                  placeholder="Optional: any specific instructions for this page..."
-                />
-                <button
-                  onClick={handleGeneratePage}
-                  className="w-full px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
-                >
-                  <>
-                    <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
-                  </>
-                </button>
-              </div>
+            <div className="space-y-6">
+              {/* Step 1: Check if Overview exists */}
+              {!hasOverview ? (
+                <div className="bg-[#111] border border-[#222] p-8">
+                  <FileText className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2 text-center">Generate Story Overview</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto text-center">
+                    Before generating pages, we need to create a story overview. This will guide the entire comic narrative.
+                  </p>
+                  <p className="text-xs text-[#555] mb-6 text-center">
+                    Claude will create a compelling story based on your project details.
+                  </p>
+                  
+                  {/* Optional Story Input */}
+                  {showStoryInput ? (
+                    <div className="max-w-lg mx-auto mb-6">
+                      <label className="text-xs text-[#E8B931] tracking-[0.15em] uppercase block mb-2">
+                        Story Ideas (Optional)
+                      </label>
+                      <p className="text-xs text-[#555] mb-3">
+                        Have a specific story in mind? Describe it briefly. Otherwise, AI will create a story based on your project details.
+                      </p>
+                      <textarea
+                        value={storyInput}
+                        onChange={(e) => setStoryInput(e.target.value)}
+                        rows={4}
+                        className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none"
+                        placeholder="E.g., 'A young hacker discovers a conspiracy in the megacity and must team up with unlikely allies to expose the truth. The story should have a twist ending where the protagonist realizes they were part of the system all along.'"
+                      />
+                    </div>
+                  ) : null}
+                  
+                  <div className="flex items-center justify-center gap-3">
+                    {!showStoryInput && (
+                      <button
+                        onClick={() => setShowStoryInput(true)}
+                        className="px-4 py-2.5 text-xs text-[#666] tracking-wide uppercase border border-[#333]"
+                      >
+                        Add Story Ideas
+                      </button>
+                    )}
+                    <button
+                      onClick={handleGenerateOverview}
+                      disabled={generatingOverview}
+                      className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
+                    >
+                      {generatingOverview ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" /> Generating Overview...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" /> Generate Overview
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : !hasPageIndex ? (
+                /* Step 2: Generate Page Index */
+                <div className="bg-[#111] border border-[#222] p-8">
+                  <BookOpen className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2 text-center">Generate Page Index</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto text-center">
+                    Great! You have a story overview. Now let&apos;s generate a page index to plan all {totalPages} pages.
+                  </p>
+                  <p className="text-xs text-[#555] mb-6 text-center">
+                    Claude will plan out all pages with titles and descriptions, then Gemini will validate the plan.
+                  </p>
+                  
+                  {/* Show the existing overview */}
+                  <div className="max-w-2xl mx-auto mb-6 p-4 bg-[#0A0A0A] border border-[#222]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-[#E8B931] tracking-[0.15em] uppercase">Story Overview</span>
+                      <button
+                        onClick={() => {
+                          setStoryInput("");
+                          setShowStoryInput(true);
+                        }}
+                        className="text-xs text-[#666] tracking-wide uppercase flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3" /> Regenerate
+                      </button>
+                    </div>
+                    <p className="text-xs text-[#999] leading-relaxed">{project?.roughOverview}</p>
+                  </div>
+                  
+                  <button
+                    onClick={handleGeneratePageIndex}
+                    disabled={generatingIndex}
+                    className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2 mx-auto"
+                  >
+                    {generatingIndex ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" /> Generating Page Index...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" /> Generate Page Index
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                /* Step 3: Generate Pages */
+                <div className="bg-[#111] border border-[#222] p-12 text-center">
+                  <Sparkles className="w-12 h-12 text-[#E8B931] mx-auto mb-4" />
+                  <h3 className="text-lg font-black text-[#F5F5F0] mb-2">Ready to Generate</h3>
+                  <p className="text-sm text-[#666] mb-2 max-w-md mx-auto">
+                    Page {approvedCount + 1} of {totalPages}. The AI will write a detailed page script with panels and dialogue.
+                  </p>
+                  <p className="text-xs text-[#555] mb-6">
+                    You can review each page, give feedback, and approve before moving to the next.
+                  </p>
+                  <div className="max-w-md mx-auto">
+                    <textarea
+                      value={userInstructions}
+                      onChange={(e) => setUserInstructions(e.target.value)}
+                      rows={2}
+                      className="w-full px-4 py-3 bg-[#0A0A0A] border border-[#222] text-sm text-[#F5F5F0] focus:border-[#E8B931] focus:outline-none resize-none mb-3"
+                      placeholder="Optional: any specific instructions for this page..."
+                    />
+                    <button
+                      onClick={handleGeneratePage}
+                      disabled={genState === "generating"}
+                      className="w-full px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2"
+                    >
+                      {genState === "generating" ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" /> Generating Page {approvedCount + 1}...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" /> Generate Page {approvedCount + 1}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -606,6 +822,188 @@ export default function ComicWorkspacePage() {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========== PAGE INDEX TAB ========== */}
+      {activeTab === "pageIndex" && project && (
+        <div className="space-y-5">
+          {/* Chapter Breakdown Section */}
+          {hasPageIndex && project.chapters && project.chapters.length > 0 && (
+            <div className="bg-[#111] border border-[#222] p-6">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
+                Chapter Breakdown
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {project.chapters.map((ch) => {
+                  // Calculate progress within this chapter
+                  const startPage = parseInt(ch.pageRange.split("-")[0]) || 1;
+                  const endPage = parseInt(ch.pageRange.split("-")[1]) || project.pageGoal;
+                  const pagesInChapter = endPage - startPage + 1;
+                  
+                  return (
+                    <div key={ch.id} className="bg-[#0A0A0A] border border-[#222] p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 bg-[#E8B931]/10 text-[#E8B931] text-xs font-bold flex items-center justify-center">
+                            {ch.number}
+                          </span>
+                          <span className="text-sm font-bold text-[#F5F5F0]">{ch.title}</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-[#666] mb-2 line-clamp-2">{ch.description}</p>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-[#E8B931]">
+                          Pages {startPage}-{endPage}
+                        </span>
+                        <span className="text-[#555]">
+                          {pagesInChapter} page{pagesInChapter !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      {/* Chapter progress bar */}
+                      <div className="mt-2 h-1 bg-[#222]">
+                        <div 
+                          className="h-full bg-[#E8B931]/50" 
+                          style={{ width: `${(pagesInChapter / project.pageGoal) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          <div className="bg-[#111] border border-[#222] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                Page Index — Overview
+              </h3>
+              {!generatingIndex && hasPageIndex && (
+                <button
+                  onClick={handleGeneratePageIndex}
+                  className="text-xs text-[#666] tracking-wide uppercase flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Regenerate
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-[#555] mb-4">
+              This index shows all planned pages organized by chapters. Review it to ensure the story flow is correct before generating actual pages.
+            </p>
+
+            {generatingIndex ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-4">
+                <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+                <p className="text-sm text-[#666]">Generating chapters and page index...</p>
+              </div>
+            ) : hasPageIndex ? (
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                {/* Group pages by chapter */}
+                {(() => {
+                  // Group pages by chapter number
+                  const chapterGroups = new Map<number, typeof pageIndex>();
+                  pageIndex.forEach((page) => {
+                    const chapterNum = page.chapterNumber || 1;
+                    if (!chapterGroups.has(chapterNum)) {
+                      chapterGroups.set(chapterNum, []);
+                    }
+                    chapterGroups.get(chapterNum)!.push(page);
+                  });
+                  
+                  // Render each chapter group
+                  return Array.from(chapterGroups.entries()).map(([chapterNum, pages]) => {
+                    const firstPage = pages[0];
+                    const chapterTitle = firstPage?.chapterTitle || "";
+                    const chapterStartPage = firstPage?.chapterStartPage || pages[0]?.pageNumber || 1;
+                    const chapterEndPage = firstPage?.chapterEndPage || pages[pages.length - 1]?.pageNumber || pages.length;
+                    
+                    return (
+                    <div key={chapterNum} className="border border-[#222]">
+                      {/* Chapter header */}
+                      <div className="bg-[#0A0A0A] px-4 py-2 border-b border-[#222] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-[#E8B931]">
+                            Chapter {chapterNum}
+                          </span>
+                          <span className="text-sm text-[#F5F5F0]">{chapterTitle}</span>
+                        </div>
+                        <span className="text-[10px] text-[#555]">
+                          Pages {chapterStartPage}-{chapterEndPage} ({pages.length} pages)
+                        </span>
+                      </div>
+                      
+                      {/* Pages in this chapter */}
+                      <div className="divide-y divide-[#222]">
+                        {pages.map((page) => (
+                          <div key={page.pageNumber} className="flex items-start gap-4 p-3 bg-[#0A0A0A] hover:bg-[#111] transition-colors">
+                            <div className="w-8 h-8 bg-[#E8B931]/10 text-[#E8B931] text-xs font-bold flex items-center justify-center flex-shrink-0">
+                              {page.pageNumber}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-bold text-[#F5F5F0] truncate block">{page.title}</span>
+                              <p className="text-xs text-[#666] mt-1 leading-relaxed">{page.description}</p>
+                              {page.keyEvents && page.keyEvents.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {page.keyEvents.map((event, i) => (
+                                    <span key={i} className="text-[10px] text-[#E8B931]/70 bg-[#E8B931]/5 px-1.5 py-0.5 border border-[#E8B931]/20">
+                                      {event}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );})}
+                )()}
+              </div>
+            ) : hasOverview ? (
+              <div className="text-center py-12">
+                <BookOpen className="w-10 h-10 text-[#333] mx-auto mb-4" />
+                <p className="text-sm text-[#555] mb-4">No page index generated yet.</p>
+                <button
+                  onClick={handleGeneratePageIndex}
+                  className="mt-4 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center gap-2 mx-auto"
+                >
+                  <Sparkles className="w-4 h-4" /> Generate Page Index
+                </button>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <FileText className="w-10 h-10 text-[#333] mx-auto mb-4" />
+                <p className="text-sm text-[#555] mb-2">Generate an Overview first.</p>
+                <p className="text-xs text-[#444]">Go to the Generate tab to create your story overview.</p>
+              </div>
+            )}
+          </div>
+
+          {hasPageIndex && (
+            <div className="bg-[#111] border border-[#222] p-5">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-3">Summary</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{pageIndex.length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Total Pages</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{project.chapters?.length || 0}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Chapters</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#F5F5F0]">{project.characters.length}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Characters</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-[#E8B931]">{project.genre.split("-")[0]}</div>
+                  <div className="text-[10px] text-[#555] uppercase tracking-wider">Genre</div>
+                </div>
               </div>
             </div>
           )}
