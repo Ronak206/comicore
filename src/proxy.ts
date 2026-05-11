@@ -1,7 +1,8 @@
 /**
- * Middleware for Authentication
+ * Proxy for Authentication (Next.js 16)
  * 
  * Protects routes that require authentication
+ * Replaces the deprecated middleware convention
  */
 
 import { NextResponse } from 'next/server';
@@ -13,7 +14,7 @@ const protectedRoutes = ['/dashboard'];
 // Routes that should redirect to dashboard if already authenticated
 const authRoutes = ['/login', '/signup'];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   
   // Get the session cookie
