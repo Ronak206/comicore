@@ -25,11 +25,15 @@ import {
   Send,
   FileText,
   RefreshCw,
+  Download,
+  FileDown,
+  Type,
+  Settings2,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────
 
-type WorkspaceTab = "generate" | "pageIndex" | "chapters" | "characters" | "world" | "style";
+type WorkspaceTab = "generate" | "pageIndex" | "chapters" | "characters" | "world" | "style" | "pdfPreview";
 
 interface ProjectData {
   id: string;
@@ -154,6 +158,149 @@ export default function ComicWorkspacePage() {
     chapterEndPage?: number;
     keyEvents: string[];
   }>>([]);
+
+  // PDF Preview state
+  const [pdfSettings, setPdfSettings] = useState({
+    font: "times",
+    fontSize: 12,
+    lineHeight: 1.6,
+    bgColor: "#FFFFFF",
+    textColor: "#000000",
+    margin: 20,
+    textAlign: "left" as "left" | "center" | "right" | "justify",
+    includePageNumbers: true,
+    includeChapterHeaders: true,
+  });
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [extractedText, setExtractedText] = useState("");
+
+  // Extract comic text for PDF
+  const extractComicText = useCallback(() => {
+    if (!project || !project.pages || project.pages.length === 0) return "";
+
+    let text = `${project.title}\n`;
+    text += `${"=".repeat(project.title.length)}\n\n`;
+    text += `Genre: ${project.genre}\n`;
+    text += `Tone: ${project.tone}\n\n`;
+    text += `Synopsis:\n${project.synopsis}\n\n`;
+    text += `${"─".repeat(50)}\n\n`;
+
+    // Add overview if exists
+    if (project.roughOverview) {
+      text += `STORY OVERVIEW\n`;
+      text += `${project.roughOverview}\n\n`;
+      text += `${"─".repeat(50)}\n\n`;
+    }
+
+    // Sort pages by number
+    const sortedPages = [...project.pages]
+      .filter(p => p.status === "approved")
+      .sort((a, b) => a.number - b.number);
+
+    // Group pages by chapter
+    const chapterMap = new Map<number, typeof sortedPages>();
+    sortedPages.forEach(page => {
+      const pageIndexItem = project.pageIndex?.find(p => p.pageNumber === page.number);
+      const chapterNum = pageIndexItem?.chapterNumber || 1;
+      if (!chapterMap.has(chapterNum)) {
+        chapterMap.set(chapterNum, []);
+      }
+      chapterMap.get(chapterNum)!.push(page);
+    });
+
+    // Generate text for each chapter
+    Array.from(chapterMap.entries())
+      .sort(([a], [b]) => a - b)
+      .forEach(([chapterNum, pages]) => {
+        const firstPage = project.pageIndex?.find(p => p.pageNumber === pages[0]?.number);
+        const chapterTitle = firstPage?.chapterTitle || `Chapter ${chapterNum}`;
+
+        if (pdfSettings.includeChapterHeaders) {
+          text += `\n${"▼".repeat(25)}\n`;
+          text += `CHAPTER ${chapterNum}: ${chapterTitle.toUpperCase()}\n`;
+          text += `${"▼".repeat(25)}\n\n`;
+        }
+
+        pages.forEach(page => {
+          text += `── PAGE ${page.number}: ${page.title} ──\n\n`;
+
+          // Add page script summary
+          if (page.script) {
+            text += `[${page.script}]\n\n`;
+          }
+
+          // Add panels with dialogue
+          if (page.panels && page.panels.length > 0) {
+            page.panels.forEach(panel => {
+              text += `  PANEL ${panel.panelNumber}\n`;
+              text += `  ${panel.description}\n`;
+
+              if (panel.dialogue && panel.dialogue.length > 0) {
+                text += `\n`;
+                panel.dialogue.forEach(d => {
+                  if (d.type === "narration") {
+                    text += `  [${d.text}]\n`;
+                  } else if (d.type === "thought") {
+                    text += `  ${d.character} (thinking): "${d.text}"\n`;
+                  } else if (d.type === "sfx") {
+                    text += `  SFX: ${d.text}\n`;
+                  } else {
+                    text += `  ${d.character}: "${d.text}"\n`;
+                  }
+                });
+              }
+              text += `\n`;
+            });
+          }
+
+          if (pdfSettings.includePageNumbers) {
+            text += `\n${"─".repeat(30)}\n\n`;
+          }
+        });
+      });
+
+    return text;
+  }, [project, pdfSettings.includeChapterHeaders, pdfSettings.includePageNumbers]);
+
+  // Update extracted text when project changes
+  useEffect(() => {
+    if (project && project.pages && project.pages.length > 0) {
+      setExtractedText(extractComicText());
+    }
+  }, [project, extractComicText]);
+
+  // Generate PDF
+  const handleGeneratePdf = async () => {
+    if (!extractedText) return;
+
+    setIsGeneratingPdf(true);
+    try {
+      const response = await fetch("/api/text-to-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: extractedText,
+          settings: pdfSettings,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to generate PDF");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${project?.title || "comic"}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
 
   // Load project from API
   const loadProject = useCallback(async () => {
@@ -347,6 +494,7 @@ export default function ComicWorkspacePage() {
     { key: "characters", label: "Characters", icon: Users },
     { key: "world", label: "World", icon: Globe },
     { key: "style", label: "Art Style", icon: Palette },
+    { key: "pdfPreview", label: "PDF Preview", icon: FileDown },
   ];
 
   if (loading) {
@@ -1156,6 +1304,216 @@ export default function ComicWorkspacePage() {
               <p className="text-xs text-[#999]">{project.style.referenceNotes}</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ========== PDF PREVIEW TAB ========== */}
+      {activeTab === "pdfPreview" && project && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Settings */}
+          <div className="space-y-4">
+            {/* Info banner */}
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <FileDown className="w-4 h-4 text-[#E8B931]" />
+                <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase">
+                  Export Comic as PDF
+                </h3>
+              </div>
+              <p className="text-xs text-[#666]">
+                Extract all dialogue and narration from your comic and export as a formatted PDF document.
+              </p>
+              <div className="flex items-center gap-2 mt-3 text-xs text-[#888]">
+                <span className="px-2 py-0.5 bg-[#0A0A0A] border border-[#333]">
+                  {approvedCount} pages ready
+                </span>
+                <span className="px-2 py-0.5 bg-[#0A0A0A] border border-[#333]">
+                  {extractedText.split(/\s+/).length} words
+                </span>
+              </div>
+            </div>
+
+            {/* Font Settings */}
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Type className="w-4 h-4 text-[#E8B931]" />
+                <h3 className="text-xs font-bold text-[#F5F5F0] tracking-wide uppercase">Typography</h3>
+              </div>
+              
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-[#666] uppercase tracking-wider block mb-1">Font</label>
+                  <select
+                    value={pdfSettings.font}
+                    onChange={(e) => setPdfSettings(s => ({ ...s, font: e.target.value }))}
+                    className="w-full bg-[#0A0A0A] border border-[#333] text-[#F5F5F0] text-xs p-2"
+                  >
+                    <option value="times">Times New Roman</option>
+                    <option value="helvetica">Helvetica</option>
+                    <option value="courier">Courier New</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+                    Font Size: {pdfSettings.fontSize}px
+                  </label>
+                  <input
+                    type="range"
+                    min="10"
+                    max="18"
+                    value={pdfSettings.fontSize}
+                    onChange={(e) => setPdfSettings(s => ({ ...s, fontSize: Number(e.target.value) }))}
+                    className="w-full accent-[#E8B931]"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+                    Line Height: {pdfSettings.lineHeight}
+                  </label>
+                  <input
+                    type="range"
+                    min="1.2"
+                    max="2.4"
+                    step="0.1"
+                    value={pdfSettings.lineHeight}
+                    onChange={(e) => setPdfSettings(s => ({ ...s, lineHeight: Number(e.target.value) }))}
+                    className="w-full accent-[#E8B931]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Color Settings */}
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Settings2 className="w-4 h-4 text-[#E8B931]" />
+                <h3 className="text-xs font-bold text-[#F5F5F0] tracking-wide uppercase">Colors</h3>
+              </div>
+              
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-[#666] uppercase tracking-wider block mb-1">Background</label>
+                  <div className="flex gap-1">
+                    {["#FFFFFF", "#FDF6E3", "#F4ECD8", "#F5F5F5"].map(color => (
+                      <button
+                        key={color}
+                        onClick={() => setPdfSettings(s => ({ ...s, bgColor: color }))}
+                        className={`w-8 h-8 border-2 ${pdfSettings.bgColor === color ? 'border-[#E8B931]' : 'border-transparent'}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={pdfSettings.bgColor}
+                      onChange={(e) => setPdfSettings(s => ({ ...s, bgColor: e.target.value }))}
+                      className="w-8 h-8 bg-transparent border-0 cursor-pointer"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="text-[10px] text-[#666] uppercase tracking-wider block mb-1">Text Color</label>
+                  <div className="flex gap-1">
+                    {["#000000", "#333333", "#1a365d", "#5D4037"].map(color => (
+                      <button
+                        key={color}
+                        onClick={() => setPdfSettings(s => ({ ...s, textColor: color }))}
+                        className={`w-8 h-8 border-2 ${pdfSettings.textColor === color ? 'border-[#E8B931]' : 'border-transparent'}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={pdfSettings.textColor}
+                      onChange={(e) => setPdfSettings(s => ({ ...s, textColor: e.target.value }))}
+                      className="w-8 h-8 bg-transparent border-0 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Options */}
+            <div className="bg-[#111] border border-[#222] p-4">
+              <h3 className="text-xs font-bold text-[#F5F5F0] tracking-wide uppercase mb-3">Options</h3>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pdfSettings.includeChapterHeaders}
+                    onChange={(e) => setPdfSettings(s => ({ ...s, includeChapterHeaders: e.target.checked }))}
+                    className="accent-[#E8B931]"
+                  />
+                  <span className="text-xs text-[#999]">Include chapter headers</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pdfSettings.includePageNumbers}
+                    onChange={(e) => setPdfSettings(s => ({ ...s, includePageNumbers: e.target.checked }))}
+                    className="accent-[#E8B931]"
+                  />
+                  <span className="text-xs text-[#999]">Include page separators</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Export Button */}
+            <button
+              onClick={handleGeneratePdf}
+              disabled={isGeneratingPdf || approvedCount === 0}
+              className="w-full py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isGeneratingPdf ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Generating PDF...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" /> Export PDF
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Right: Preview */}
+          <div className="lg:col-span-2 bg-[#111] border border-[#222] p-4 h-[calc(100vh-250px)] overflow-hidden">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-bold text-[#F5F5F0] tracking-wide uppercase flex items-center gap-2">
+                <Eye className="w-4 h-4 text-[#E8B931]" /> Preview
+              </h3>
+              <span className="text-[10px] text-[#666]">A4 Format</span>
+            </div>
+            
+            <div className="h-[calc(100%-40px)] overflow-y-auto bg-[#2a2a2a] p-4 rounded flex justify-center">
+              {approvedCount > 0 ? (
+                <div
+                  className="w-[595px] min-h-[842px] shadow-2xl p-8 transition-all duration-300"
+                  style={{
+                    backgroundColor: pdfSettings.bgColor,
+                    color: pdfSettings.textColor,
+                    fontFamily: pdfSettings.font === "times" ? "Georgia, serif" : 
+                               pdfSettings.font === "courier" ? "Courier New, monospace" : 
+                               "Helvetica, Arial, sans-serif",
+                    fontSize: `${pdfSettings.fontSize}px`,
+                    lineHeight: pdfSettings.lineHeight,
+                  }}
+                >
+                  <pre className="whitespace-pre-wrap break-words font-inherit text-inherit">
+                    {extractedText || "No content generated yet..."}
+                  </pre>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <FileText className="w-16 h-16 text-[#333] mb-4" />
+                  <p className="text-sm text-[#666] mb-2">No pages generated yet</p>
+                  <p className="text-xs text-[#444]">Generate and approve some pages to preview the PDF</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
