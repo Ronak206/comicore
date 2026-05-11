@@ -1,23 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   Brain,
   Database,
   Eye,
   Layers,
-  AlertTriangle,
-  RefreshCw,
   ChevronRight,
   Users,
   BookOpen,
   Palette,
-  Maximize2,
-  Trash2,
   Search,
+  FileText,
+  Archive,
+  Image,
+  Loader2,
+  Download,
+  Trash2,
+  RefreshCw,
 } from "lucide-react";
 
 type MemoryTab = "overview" | "characters" | "visual" | "panels";
+
+interface ExportItem {
+  id: string;
+  bookId: string;
+  title: string;
+  format: string;
+  status: string;
+  pageCount: number;
+  originalSize: string;
+  compressedSize: string;
+  compressionRatio: string;
+  createdAt: string;
+  downloadUrl: string;
+}
+
+interface ExportStats {
+  totalExports: number;
+  totalSize: string;
+}
 
 const characters = [
   {
@@ -56,24 +79,6 @@ const characters = [
     attributes: ["Brown skin", "Bald head", "Shadow powers", "Tactical vest"],
     status: "Active",
   },
-  {
-    name: "Aria Voss",
-    role: "Protagonist",
-    comic: "Neon Dreams",
-    appearances: 8,
-    lastSeen: "Page 8",
-    attributes: ["Pink hair", "Neon tattoos", "DJ headphones", "Street wear"],
-    status: "Active",
-  },
-  {
-    name: "General Thorne",
-    role: "Antagonist",
-    comic: "Iron Legacy",
-    appearances: 14,
-    lastSeen: "Page 16",
-    attributes: ["Military uniform", "Steel jaw implant", "Gray hair", "Authority aura"],
-    status: "Active",
-  },
 ];
 
 const memoryLayers = [
@@ -81,48 +86,74 @@ const memoryLayers = [
     name: "Story Memory",
     icon: BookOpen,
     description: "Plot arcs, character relationships, dialogue patterns, story beats",
-    size: "2.4 MB",
     entries: 847,
     health: 94,
-    color: "#E8B931",
   },
   {
     name: "Visual Memory",
     icon: Eye,
     description: "Character designs, art style consistency, color palettes, environment details",
-    size: 5.8,
     entries: 1243,
     health: 91,
-    color: "#E8B931",
   },
   {
     name: "Panel Memory",
     icon: Layers,
     description: "Layout patterns, panel compositions, pacing rhythm, page flow",
-    size: "1.2 MB",
     entries: 412,
     health: 97,
-    color: "#E8B931",
   },
-];
-
-const recentMemoryEvents = [
-  { action: "Character updated", detail: "Kai Nakamura — new scar detail added", time: "2 hours ago", type: "character" },
-  { action: "Style locked", detail: "The Last Cyberpunk — noir-cyberpunk palette saved", time: "5 hours ago", type: "visual" },
-  { action: "Plot node added", detail: "Shadow Walker — betrayal arc checkpoint", time: "Yesterday", type: "story" },
-  { action: "Compression run", detail: "Iron Legacy — 5% memory compressed (32 pages)", time: "2 days ago", type: "system" },
-  { action: "New character", detail: "Aria Voss — initial design stored", time: "3 days ago", type: "character" },
-  { action: "Layout learned", detail: "Neon Dreams — 3-panel action layout pattern", time: "4 days ago", type: "panel" },
 ];
 
 export default function MemoryBankPage() {
   const [activeTab, setActiveTab] = useState<MemoryTab>("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  const [exports, setExports] = useState<ExportItem[]>([]);
+  const [exportStats, setExportStats] = useState<ExportStats>({ totalExports: 0, totalSize: "0 KB" });
+  const [loadingExports, setLoadingExports] = useState(true);
+
+  // Fetch exports
+  useEffect(() => {
+    async function fetchExports() {
+      try {
+        setLoadingExports(true);
+        const res = await fetch("/api/exports");
+        const data = await res.json();
+        if (data.success) {
+          setExports(data.data || []);
+          setExportStats(data.stats || { totalExports: 0, totalSize: "0 KB" });
+        }
+      } catch (error) {
+        console.error("Failed to fetch exports:", error);
+      } finally {
+        setLoadingExports(false);
+      }
+    }
+    fetchExports();
+  }, []);
 
   const filteredCharacters = characters.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     c.comic.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const getFormatIcon = (format: string) => {
+    switch (format.toLowerCase()) {
+      case "pdf":
+        return FileText;
+      case "cbz":
+        return Archive;
+      case "images":
+        return Image;
+      default:
+        return FileText;
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -167,40 +198,95 @@ export default function MemoryBankPage() {
             <div className="text-xs text-[#666] leading-relaxed">
               {layer.description}
             </div>
-            <div className="mt-3 pt-3 border-t border-[#222] flex items-center justify-between">
-              <span className="text-[10px] text-[#555] uppercase tracking-wider">
-                Size: {layer.size}
-              </span>
-              <span className="text-[10px] text-[#555] uppercase tracking-wider flex items-center gap-1">
-                Active <div className="w-1.5 h-1.5 bg-[#E8B931] rounded-full" />
-              </span>
-            </div>
           </div>
         ))}
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Memory</div>
-          <div className="text-2xl font-black text-[#E8B931]">9.4 MB</div>
-          <div className="text-xs text-[#555]">Across all comics</div>
+      {/* Generated Exports Section */}
+      <div className="bg-[#111] border border-[#222] p-6">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <Database className="w-5 h-5 text-[#E8B931]" />
+            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+              Generated Exports
+            </h3>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-xs text-[#666]">
+              {exportStats.totalExports} exports • {exportStats.totalSize} total
+            </div>
+            <Link
+              href="/dashboard/export"
+              className="text-xs text-[#E8B931] tracking-wide uppercase flex items-center gap-1 hover:underline"
+            >
+              Create New <ChevronRight className="w-3 h-3" />
+            </Link>
+          </div>
         </div>
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Characters</div>
-          <div className="text-2xl font-black text-[#E8B931]">38</div>
-          <div className="text-xs text-[#555]">Fully tracked</div>
-        </div>
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Compression</div>
-          <div className="text-2xl font-black text-[#E8B931]">5%</div>
-          <div className="text-xs text-[#555]">Auto-optimized</div>
-        </div>
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Consistency</div>
-          <div className="text-2xl font-black text-[#E8B931]">94%</div>
-          <div className="text-xs text-[#555]">Cross-page score</div>
-        </div>
+
+        {loadingExports ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 text-[#E8B931] animate-spin" />
+          </div>
+        ) : exports.length > 0 ? (
+          <div className="space-y-3">
+            {exports.slice(0, 5).map((exp) => {
+              const FormatIcon = getFormatIcon(exp.format);
+              return (
+                <div
+                  key={exp.id}
+                  className="bg-[#0A0A0A] border border-[#222] p-4 flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-[#E8B931]/10 flex items-center justify-center">
+                      <FormatIcon className="w-5 h-5 text-[#E8B931]" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-[#F5F5F0]">{exp.title}</div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[10px] text-[#E8B931] uppercase tracking-wider border border-[#E8B931]/30 px-1.5 py-0.5">
+                          {exp.format}
+                        </span>
+                        <span className="text-[10px] text-[#555]">{exp.pageCount} pages</span>
+                        <span className="text-[10px] text-[#555]">{exp.originalSize}</span>
+                        <span className="text-[10px] text-[#555]">({exp.compressionRatio} compressed)</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-[#555]">{formatDate(exp.createdAt)}</span>
+                    <a
+                      href={exp.downloadUrl}
+                      className="p-2 bg-[#E8B931] text-[#0A0A0A] hover:bg-[#c9a020] transition-colors"
+                      title="Download"
+                    >
+                      <Download className="w-4 h-4" />
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+            {exports.length > 5 && (
+              <Link
+                href="/dashboard/export"
+                className="block text-center text-xs text-[#666] py-3 hover:text-[#E8B931] transition-colors"
+              >
+                View all {exports.length} exports →
+              </Link>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-[#555]">
+            <Archive className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No exports yet</p>
+            <Link
+              href="/dashboard/export"
+              className="text-xs text-[#E8B931] hover:underline mt-2 inline-block"
+            >
+              Create your first export →
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -228,71 +314,61 @@ export default function MemoryBankPage() {
       {/* Tab Content */}
       {activeTab === "overview" && (
         <div className="space-y-6">
-          {/* Memory timeline */}
-          <div className="bg-[#111] border border-[#222] p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-                Memory Activity
-              </h3>
-              <button className="text-xs text-[#666] tracking-wide uppercase flex items-center gap-1">
-                View All <ChevronRight className="w-3 h-3" />
-              </button>
+          {/* Stats row */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Memory</div>
+              <div className="text-2xl font-black text-[#E8B931]">{exportStats.totalSize}</div>
+              <div className="text-xs text-[#555]">Across all comics</div>
             </div>
-            <div className="space-y-4">
-              {recentMemoryEvents.map((event, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className={`w-2 h-2 mt-1.5 flex-shrink-0 rounded-full ${
-                    event.type === "character" ? "bg-[#E8B931]" :
-                    event.type === "visual" ? "bg-[#999]" :
-                    event.type === "story" ? "bg-[#E8B931]/60" :
-                    "bg-[#555]"
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[#F5F5F0]">{event.action}</span>
-                      <span className="text-[10px] text-[#555] tracking-widest uppercase border border-[#333] px-1.5 py-0.5">
-                        {event.type}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#666] mt-0.5">{event.detail}</p>
-                    <p className="text-[10px] text-[#555] mt-0.5">{event.time}</p>
-                  </div>
-                </div>
-              ))}
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Characters</div>
+              <div className="text-2xl font-black text-[#E8B931]">38</div>
+              <div className="text-xs text-[#555]">Fully tracked</div>
+            </div>
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Compression</div>
+              <div className="text-2xl font-black text-[#E8B931]">~50%</div>
+              <div className="text-xs text-[#555]">Auto-optimized</div>
+            </div>
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Consistency</div>
+              <div className="text-2xl font-black text-[#E8B931]">94%</div>
+              <div className="text-xs text-[#555]">Cross-page score</div>
             </div>
           </div>
 
           {/* Compression info */}
           <div className="bg-[#111] border border-[#222] p-6">
             <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
-              Compression Engine
+              Memory Compression Engine
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-[#0A0A0A] border border-[#222] p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <AlertTriangle className="w-4 h-4 text-[#E8B931]" />
-                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Trigger</span>
+                  <RefreshCw className="w-4 h-4 text-[#E8B931]" />
+                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Auto Compression</span>
                 </div>
                 <p className="text-xs text-[#666] leading-relaxed">
-                  Automatically compresses oldest memory entries when a comic exceeds 50 pages. Story beats are summarized, visual references are deduplicated, and panel patterns are averaged.
+                  PDFs and exports are automatically compressed using gzip before storage. Typical compression ratio is 50-70% of original size.
                 </p>
               </div>
               <div className="bg-[#0A0A0A] border border-[#222] p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Database className="w-4 h-4 text-[#E8B931]" />
-                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Strategy</span>
+                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">MongoDB Storage</span>
                 </div>
                 <p className="text-xs text-[#666] leading-relaxed">
-                  Story memory uses narrative summarization. Visual memory keeps a reference image set with style vectors. Panel memory stores layout templates as compressed JSON blueprints.
+                  All exports are stored in MongoDB with compression. Download anytime without regeneration. Old exports auto-cleanup.
                 </p>
               </div>
               <div className="bg-[#0A0A0A] border border-[#222] p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <RefreshCw className="w-4 h-4 text-[#E8B931]" />
-                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Retention</span>
+                  <Brain className="w-4 h-4 text-[#E8B931]" />
+                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Memory Layers</span>
                 </div>
                 <p className="text-xs text-[#666] leading-relaxed">
-                  Character core traits and key story events are never compressed. Only redundant visual details and repeated panel layouts are optimized. First and last 10 pages always fully preserved.
+                  Three-layer memory: Story (plot, dialogue), Visual (style, colors), Panel (layouts, flow). All tracked automatically.
                 </p>
               </div>
             </div>
@@ -362,9 +438,6 @@ export default function MemoryBankPage() {
                     <span className="text-[10px] text-[#555] uppercase tracking-wider flex items-center gap-1">
                       Tracked <div className="w-1.5 h-1.5 bg-[#E8B931] rounded-full" />
                     </span>
-                    <button className="text-[#555] p-1">
-                      <Trash2 className="w-3 h-3" />
-                    </button>
                   </div>
                 </div>
               </div>
