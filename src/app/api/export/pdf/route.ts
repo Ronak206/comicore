@@ -428,290 +428,180 @@ async function generatePdfBytes(
     drawSeparator(tocPage, margin, 60, contentWidth, colors.primary);
   }
 
-  // === CONTENT PAGES ===
+  // === CONTENT PAGES (Simple & Clean) ===
   for (let pageIndex = 0; pageIndex < approvedPages.length; pageIndex++) {
     const page = approvedPages[pageIndex];
     const contentPage = addPage();
 
-    let yPos = pageHeight - 80;
+    let yPos = pageHeight - 60;
 
-    // Page header bar
-    if (includePageNumbers) {
-      drawRoundedBox(contentPage, 0, pageHeight - 50, pageWidth, 50, 0, colors.lightGray, colors.lightGray);
-      
-      const headerText = sanitizeForPdf(title);
-      contentPage.drawText(headerText, {
-        x: margin,
-        y: pageHeight - 32,
-        size: 10,
-        font: fontBold,
-        color: colors.primary,
-      });
+    // Simple header with title and page number
+    const headerText = sanitizeForPdf(title);
+    contentPage.drawText(headerText, {
+      x: margin,
+      y: pageHeight - 40,
+      size: 10,
+      font: fontBold,
+      color: rgb(0.3, 0.3, 0.3),
+    });
 
-      // Page number in circle (simulated with rounded box)
-      const pageNumText = String(pageIndex + 1);
-      const pageNumWidth = fontBold.widthOfTextAtSize(pageNumText, 10);
-      const pageNumX = pageWidth - margin - 20;
-      
-      drawRoundedBox(contentPage, pageNumX, pageHeight - 42, 25, 22, 0, colors.primary, colors.primary);
-      contentPage.drawText(pageNumText, {
-        x: pageNumX + (25 - pageNumWidth) / 2,
-        y: pageHeight - 35,
-        size: 10,
-        font: fontBold,
-        color: colors.white,
-      });
-    }
+    // Page number on right
+    const pageNumText = `Page ${pageIndex + 1}`;
+    const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
+    contentPage.drawText(pageNumText, {
+      x: pageWidth - margin - pageNumWidth,
+      y: pageHeight - 40,
+      size: 10,
+      font: font,
+      color: rgb(0.5, 0.5, 0.5),
+    });
 
-    // Page title with decorative underline
+    // Separator line under header
+    contentPage.drawLine({
+      start: { x: margin, y: pageHeight - 55 },
+      end: { x: pageWidth - margin, y: pageHeight - 55 },
+      thickness: 0.5,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+
+    // Page title (bold)
     const pageTitle = sanitizeForPdf(page.title);
-    const pageTitleWidth = fontBold.widthOfTextAtSize(pageTitle, 18);
     contentPage.drawText(pageTitle, {
       x: margin,
       y: yPos,
-      size: 18,
+      size: 16,
       font: fontBold,
-      color: colors.primary,
+      color: rgb(0.1, 0.1, 0.1),
     });
-    
-    // Decorative underline for page title
-    drawRoundedBox(contentPage, margin, yPos - 8, Math.min(pageTitleWidth, contentWidth), 3, 0, colors.accent, colors.accent);
-    yPos -= 35;
+    yPos -= 25;
 
-    // Chapter info if available
-    const pageIndexItem = project.pageIndex?.find((p: any) => p.pageNumber === page.number);
-    if (pageIndexItem?.chapterTitle) {
-      const chapterText = sanitizeForPdf(`Chapter ${pageIndexItem.chapterNumber}: ${pageIndexItem.chapterTitle}`);
-      
-      // Chapter box
-      drawRoundedBox(contentPage, margin, yPos - 5, contentWidth, 20, 0, colors.lightPurple, colors.secondary, 1);
-      
-      contentPage.drawText(chapterText, {
-        x: margin + 10,
-        y: yPos + 3,
-        size: 11,
-        font: fontOblique,
-        color: colors.secondary,
-      });
-      yPos -= 35;
-    }
-
-    // Script preview with box
-    if (page.script) {
-      const scriptBoxHeight = 60;
-      drawRoundedBox(contentPage, margin, yPos - scriptBoxHeight, contentWidth, scriptBoxHeight, 0, colors.lightGray, colors.border, 1);
-      
-      // Script header
-      contentPage.drawText("Script Preview", {
-        x: margin + 8,
-        y: yPos - 12,
-        size: 9,
-        font: fontBold,
-        color: colors.primary,
-      });
-
-      const scriptLines = wrapText(page.script, contentWidth - 20, fontOblique, 9);
-      let scriptY = yPos - 28;
-      scriptLines.slice(0, 3).forEach((line) => {
-        contentPage.drawText(line, {
-          x: margin + 8,
-          y: scriptY,
-          size: 9,
-          font: fontOblique,
-          color: colors.mediumText,
-        });
-        scriptY -= 14;
-      });
-      yPos -= scriptBoxHeight + 20;
-    }
-
-    // Panels section header
-    drawRoundedBox(contentPage, margin - 5, yPos - 25, contentWidth + 10, 30, 0, colors.primary, colors.primary);
-    contentPage.drawText("Panels", {
-      x: margin + 5,
-      y: yPos - 15,
-      size: 12,
-      font: fontBold,
-      color: colors.white,
+    // Underline under page title
+    contentPage.drawLine({
+      start: { x: margin, y: yPos + 8 },
+      end: { x: margin + fontBold.widthOfTextAtSize(pageTitle, 16), y: yPos + 8 },
+      thickness: 1,
+      color: rgb(0.7, 0.7, 0.7),
     });
-    yPos -= 45;
+    yPos -= 20;
 
-    // Panel content
+    // Panel content - Simple layout
     for (let panelIndex = 0; panelIndex < page.panels.length; panelIndex++) {
       const panel = page.panels[panelIndex];
 
       // Check if we need a new page
-      if (yPos < 180) {
+      if (yPos < 120) {
         const newContentPage = addPage();
-        yPos = pageHeight - 80;
+        yPos = pageHeight - 60;
       }
 
-      // Panel box with border
-      const panelBoxStartY = yPos + 25;
-      
-      // Calculate panel box height based on content
-      let estimatedHeight = 100; // Base height - increased for more padding
-      if (panel.dialogue && panel.dialogue.length > 0) {
-        estimatedHeight += panel.dialogue.length * 30;
-      }
-      if (panel.cameraAngle || panel.mood) {
-        estimatedHeight += 25;
-      }
-
-      // Draw panel background
-      const panelBg = panelIndex % 2 === 0 ? colors.lightBlue : colors.white;
-      drawRoundedBox(contentPage, margin - 5, yPos - estimatedHeight + 25, contentWidth + 10, estimatedHeight, 0, panelBg, colors.primary, 1);
-
-      // Panel number with colored background
+      // Panel title (bold) - Panel 1, Panel 2, etc.
       const panelTitle = `Panel ${panel.panelNumber || panelIndex + 1}`;
-      const panelTitleWidth = fontBold.widthOfTextAtSize(panelTitle, 11);
-      drawRoundedBox(contentPage, margin, yPos, panelTitleWidth + 16, 20, 0, colors.secondary, colors.secondary);
-      
       contentPage.drawText(panelTitle, {
-        x: margin + 8,
-        y: yPos + 5,
-        size: 11,
+        x: margin,
+        y: yPos,
+        size: 12,
         font: fontBold,
-        color: colors.white,
+        color: rgb(0.2, 0.2, 0.6),
       });
-      yPos -= 30; // More space after panel title
+      yPos -= 18;
 
-      // Panel description with bullet
-      const descLines = wrapText(panel.description, contentWidth - 30, font, 10);
-      descLines.slice(0, 4).forEach((line, lineIdx) => {
-        if (lineIdx === 0) {
-          // Add bullet point for first line
-          contentPage.drawText(">", {
-            x: margin + 5,
+      // Panel description
+      if (panel.description) {
+        const descLines = wrapText(panel.description, contentWidth, font, 10);
+        descLines.forEach((line) => {
+          contentPage.drawText(line, {
+            x: margin + 10,
             y: yPos,
-            size: 8,
+            size: 10,
             font: font,
-            color: colors.primary,
+            color: rgb(0.2, 0.2, 0.2),
           });
-        }
-        contentPage.drawText(line, {
-          x: margin + 18,
-          y: yPos,
-          size: 10,
-          font: font,
-          color: colors.darkText,
+          yPos -= 14;
         });
-        yPos -= 18; // More space between description lines
-      });
-      yPos -= 10; // More gap after description section
+      }
 
-      // Camera and mood as tags
+      // Camera and mood (simple text)
       if (panel.cameraAngle || panel.mood) {
-        let tagX = margin + 5;
-        
-        if (panel.cameraAngle) {
-          const cameraText = sanitizeForPdf(`[Cam] ${panel.cameraAngle}`);
-          const cameraWidth = font.widthOfTextAtSize(cameraText, 8);
-          drawRoundedBox(contentPage, tagX, yPos - 2, cameraWidth + 10, 16, 0, colors.lightPurple, colors.secondary, 1);
-          contentPage.drawText(cameraText, {
-            x: tagX + 5,
-            y: yPos + 2,
-            size: 8,
-            font: font,
-            color: colors.secondary,
-          });
-          tagX += cameraWidth + 20;
-        }
-        
-        if (panel.mood) {
-          const moodText = sanitizeForPdf(`[Mood] ${panel.mood}`);
-          const moodWidth = font.widthOfTextAtSize(moodText, 8);
-          drawRoundedBox(contentPage, tagX, yPos - 2, moodWidth + 10, 16, 0, colors.lightBlue, colors.primary, 1);
-          contentPage.drawText(moodText, {
-            x: tagX + 5,
-            y: yPos + 2,
-            size: 8,
-            font: font,
-            color: colors.primary,
-          });
-        }
-        yPos -= 25; // More space after camera/mood tags
+        const meta = [];
+        if (panel.cameraAngle) meta.push(`Camera: ${panel.cameraAngle}`);
+        if (panel.mood) meta.push(`Mood: ${panel.mood}`);
+        const metaText = sanitizeForPdf(meta.join("  |  "));
+        contentPage.drawText(metaText, {
+          x: margin + 10,
+          y: yPos,
+          size: 9,
+          font: fontOblique,
+          color: rgb(0.4, 0.4, 0.4),
+        });
+        yPos -= 16;
       }
 
       // Dialogue
       if (panel.dialogue && panel.dialogue.length > 0) {
-        yPos -= 10; // More gap before dialogue section
+        yPos -= 5;
         
         for (const d of panel.dialogue) {
-          if (yPos < 100) {
+          if (yPos < 80) {
             const newContentPage = addPage();
-            yPos = pageHeight - 80;
+            yPos = pageHeight - 60;
           }
 
           const isNarration = d.type === "narration";
           const isSfx = d.type === "sfx";
-          const prefix = sanitizeForPdf(d.character);
+          const charName = sanitizeForPdf(d.character);
           const dialogueText = sanitizeForPdf(d.text);
 
-          // Dialogue box
-          const dialogueWidth = contentWidth - 30;
-          const dialogueBoxX = margin + 10;
-          
-          // Character name with styling
-          if (!isNarration) {
-            // Character tag
-            const charWidth = fontBold.widthOfTextAtSize(prefix, 9);
-            drawRoundedBox(contentPage, dialogueBoxX, yPos, charWidth + 12, 16, 0, colors.primary, colors.primary);
-            contentPage.drawText(prefix, {
-              x: dialogueBoxX + 6,
-              y: yPos + 4,
-              size: 9,
-              font: fontBold,
-              color: colors.white,
-            });
-            yPos -= 20;
-          } else {
-            // Narration indicator
-            contentPage.drawText(`[${prefix}]`, {
-              x: dialogueBoxX,
-              y: yPos + 4,
-              size: 9,
-              font: fontOblique,
-              color: colors.lightText,
-            });
-            yPos -= 20;
-          }
+          // Character name
+          const prefix = isNarration ? `[${charName}]` : `${charName}:`;
+          contentPage.drawText(prefix, {
+            x: margin + 10,
+            y: yPos,
+            size: 9,
+            font: fontBold,
+            color: rgb(0.2, 0.2, 0.5),
+          });
+          yPos -= 14;
 
-          // Dialogue text with wrap
-          const dialogueLines = wrapText(dialogueText, dialogueWidth - 10, font, 9);
-          
-          // Dialogue background
-          const dlgBg = isSfx ? colors.lightPurple : colors.lightGray;
-          const dlgHeight = dialogueLines.length * 14 + 8;
-          drawRoundedBox(contentPage, dialogueBoxX + 5, yPos - dlgHeight + 10, dialogueWidth - 10, dlgHeight, 0, dlgBg, dlgBg);
-
-          dialogueLines.forEach((line, idx) => {
-            contentPage.drawText(isSfx ? `*${line}*` : line, {
-              x: dialogueBoxX + 10,
-              y: yPos - idx * 14,
+          // Dialogue text
+          const dialogueLines = wrapText(dialogueText, contentWidth - 20, font, 9);
+          dialogueLines.forEach((line) => {
+            const displayText = isSfx ? `*${line}*` : line;
+            contentPage.drawText(displayText, {
+              x: margin + 20,
+              y: yPos,
               size: 9,
               font: isNarration || isSfx ? fontOblique : font,
-              color: colors.darkText,
+              color: rgb(0.3, 0.3, 0.3),
             });
+            yPos -= 12;
           });
-          yPos -= dialogueLines.length * 16 + 18; // More space after each dialogue
+          yPos -= 6;
         }
       }
 
-      yPos -= 30; // Significantly more gap between panels
+      // Add significant spacing between panels
+      yPos -= 20;
+      
+      // Separator line between panels
+      contentPage.drawLine({
+        start: { x: margin + 30, y: yPos + 8 },
+        end: { x: pageWidth - margin - 30, y: yPos + 8 },
+        thickness: 0.3,
+        color: rgb(0.85, 0.85, 0.85),
+      });
+      
+      yPos -= 15;
     }
 
-    // Footer
-    drawRoundedBox(contentPage, 0, 0, pageWidth, 35, 0, colors.lightGray, colors.lightGray);
-    
+    // Simple footer
     const footerText = sanitizeForPdf(`Comicore AI  |  ${title}`);
     const footerWidth = font.widthOfTextAtSize(footerText, 8);
     contentPage.drawText(footerText, {
       x: (pageWidth - footerWidth) / 2,
-      y: 12,
+      y: 25,
       size: 8,
       font: font,
-      color: colors.lightText,
+      color: rgb(0.6, 0.6, 0.6),
     });
   }
 
