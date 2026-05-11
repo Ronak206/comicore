@@ -203,6 +203,7 @@ export default function ExportPage() {
         filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}-pages.zip`;
       }
 
+      // Step 1: Generate and store the export
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -223,45 +224,52 @@ export default function ExportPage() {
         }),
       });
 
+      const data = await res.json();
+
       // Check for errors
-      if (!res.ok) {
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-          const data = await res.json();
-          setError(data.error || "Export failed");
-          return;
-        }
-        setError("Export failed. Please try again.");
+      if (!res.ok || !data.success) {
+        setError(data.error || "Export failed");
         return;
       }
 
-      // Get the blob and download
-      const blob = await res.blob();
-      const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
+      // Step 2: Download the generated file
+      if (data.data?.downloadUrl) {
+        const downloadRes = await fetch(data.data.downloadUrl);
+        
+        if (!downloadRes.ok) {
+          setError("Failed to download generated file");
+          return;
+        }
 
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+        const blob = await downloadRes.blob();
+        const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
 
-      // Add to export history
-      const newExport: ExportRecord = {
-        id: `export_${Date.now()}`,
-        projectId: selectedProject.id,
-        comicTitle: selectedProject.title,
-        format: selectedFormat.toUpperCase(),
-        pages: selectedProject.pages?.filter((p) => p.status === "approved").length || 0,
-        size: `${sizeMB} MB`,
-        date: "Just now",
-        status: "completed",
-      };
-      setExportHistory((prev) => [newExport, ...prev]);
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
 
-      setStep("download");
+        // Add to export history
+        const newExport: ExportRecord = {
+          id: data.data.exportId || `export_${Date.now()}`,
+          projectId: selectedProject.id,
+          comicTitle: selectedProject.title,
+          format: selectedFormat.toUpperCase(),
+          pages: data.data.pageCount || selectedProject.pages?.filter((p) => p.status === "approved").length || 0,
+          size: `${sizeMB} MB`,
+          date: "Just now",
+          status: "completed",
+        };
+        setExportHistory((prev) => [newExport, ...prev]);
+
+        setStep("download");
+      } else {
+        setError("No download URL returned");
+      }
     } catch (err: any) {
       setError(err.message || "Export failed");
     } finally {
