@@ -10,6 +10,15 @@ import {
   Brain,
   Loader2,
   FolderOpen,
+  Eye,
+  X,
+  BookOpen,
+  FileText,
+  Archive,
+  Image,
+  Settings2,
+  Type,
+  Check,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────
@@ -23,6 +32,35 @@ interface Project {
   totalPages: number;
   createdAt: string;
   updatedAt: string;
+}
+
+interface ProjectDetail {
+  id: string;
+  title: string;
+  genre: string;
+  synopsis: string;
+  tone: string;
+  status: string;
+  pageGoal: number;
+  currentPage: number;
+  pages: Array<{
+    id: string;
+    number: number;
+    title: string;
+    status: string;
+    panels: Array<{
+      panelNumber: number;
+      description: string;
+      dialogue: Array<{
+        character: string;
+        text: string;
+        type: string;
+      }>;
+      cameraAngle: string;
+      mood: string;
+    }>;
+    script: string;
+  }>;
 }
 
 // ─── Helpers ─────────────────────────────────────
@@ -84,12 +122,38 @@ function getGradient(genre: string): string {
   return gradients[genre] || "from-[#1A1A1A] to-[#151515]";
 }
 
+const exportFormats = [
+  { id: "pdf", name: "PDF", icon: FileText, ext: ".pdf" },
+  { id: "cbz", name: "CBZ", icon: Archive, ext: ".cbz" },
+  { id: "images", name: "PNG Images", icon: Image, ext: ".zip" },
+];
+
+const fontOptions = [
+  { id: "helvetica", name: "Helvetica" },
+  { id: "times", name: "Times Roman" },
+  { id: "courier", name: "Courier" },
+];
+
 // ─── Component ───────────────────────────────────
 
 export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Preview modal state
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewProject, setPreviewProject] = useState<ProjectDetail | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [selectedFormat, setSelectedFormat] = useState<string>("pdf");
+  const [exporting, setExporting] = useState(false);
+  const [pdfSettings, setPdfSettings] = useState({
+    font: "helvetica",
+    fontSize: 10,
+    includeCover: true,
+    includeToc: true,
+    includePageNumbers: true,
+  });
 
   // Fetch real projects from DB
   useEffect(() => {
@@ -109,6 +173,103 @@ export default function DashboardPage() {
     }
     fetchProjects();
   }, []);
+
+  // Handle project click
+  const handleProjectClick = async (project: Project) => {
+    // For completed projects, show preview
+    if (project.status === "complete" || project.pages > 0) {
+      await openPreview(project.id);
+    }
+    // For in-progress projects, navigate to workspace (handled by Link)
+  };
+
+  // Open preview modal
+  const openPreview = async (projectId: string) => {
+    try {
+      setLoadingPreview(true);
+      setShowPreview(true);
+      const res = await fetch(`/api/engine/project/${projectId}`);
+      const data = await res.json();
+      if (data.success) {
+        setPreviewProject(data.data);
+      } else {
+        setError(data.error || "Failed to load preview");
+        setShowPreview(false);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to load preview");
+      setShowPreview(false);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  // Close preview modal
+  const closePreview = () => {
+    setShowPreview(false);
+    setPreviewProject(null);
+    setSelectedFormat("pdf");
+  };
+
+  // Handle export from preview
+  const handleExport = async () => {
+    if (!previewProject) return;
+
+    setExporting(true);
+    try {
+      let endpoint = "/api/export/pdf";
+      let filename = `${previewProject.title.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+
+      if (selectedFormat === "cbz") {
+        endpoint = "/api/export/cbz";
+        filename = `${previewProject.title.replace(/\s+/g, "-").toLowerCase()}.cbz`;
+      } else if (selectedFormat === "images") {
+        endpoint = "/api/export/images";
+        filename = `${previewProject.title.replace(/\s+/g, "-").toLowerCase()}-pages.zip`;
+      }
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: previewProject.id,
+          options: {
+            title: previewProject.title,
+            font: pdfSettings.font,
+            fontSize: pdfSettings.fontSize,
+            includeCover: pdfSettings.includeCover,
+            includeToc: pdfSettings.includeToc,
+            includePageNumbers: pdfSettings.includePageNumbers,
+            metadata: {
+              title: previewProject.title,
+              author: "Comicore AI",
+            },
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      closePreview();
+    } catch (err: any) {
+      setError(err.message || "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Compute stats from real data
   const totalComics = projects.length;
@@ -140,186 +301,451 @@ export default function DashboardPage() {
     });
   }
 
+  // Get approved pages count for preview
+  const getApprovedPagesCount = () => {
+    if (!previewProject?.pages) return 0;
+    return previewProject.pages.filter((p) => p.status === "approved").length;
+  };
+
   return (
-    <div className="space-y-8">
-      {/* Page header */}
-      <div className="space-y-1">
-        <h2 className="text-2xl font-black text-[#F5F5F0] tracking-tight">
-          Your Comics
-        </h2>
-        <p className="text-sm text-[#666]">
-          {loading ? "Loading projects..." : projects.length > 0 ? `${projects.length} project${projects.length !== 1 ? "s" : ""} — pick up where you left off.` : "No projects yet. Create your first comic!"}
-        </p>
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat) => (
-          <div
-            key={stat.label}
-            className="bg-[#111] border border-[#222] p-5"
-          >
-            <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-2">
-              {stat.label}
-            </div>
-            <div className="text-3xl font-black text-[#E8B931] mb-1">
-              {stat.value}
-            </div>
-            <div className="text-xs text-[#555]">{stat.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="bg-red-950/30 border border-red-900/40 p-4 text-sm text-red-400">
-          {error}
+    <>
+      <div className="space-y-8">
+        {/* Page header */}
+        <div className="space-y-1">
+          <h2 className="text-2xl font-black text-[#F5F5F0] tracking-tight">
+            Your Comics
+          </h2>
+          <p className="text-sm text-[#666]">
+            {loading ? "Loading projects..." : projects.length > 0 ? `${projects.length} project${projects.length !== 1 ? "s" : ""} — pick up where you left off.` : "No projects yet. Create your first comic!"}
+          </p>
         </div>
-      )}
 
-      {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 text-[#E8B931] animate-spin" />
-          <span className="text-sm text-[#666] ml-3">Loading projects...</span>
+        {/* Stats row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {stats.map((stat) => (
+            <div
+              key={stat.label}
+              className="bg-[#111] border border-[#222] p-5"
+            >
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-2">
+                {stat.label}
+              </div>
+              <div className="text-3xl font-black text-[#E8B931] mb-1">
+                {stat.value}
+              </div>
+              <div className="text-xs text-[#555]">{stat.sub}</div>
+            </div>
+          ))}
         </div>
-      )}
 
-      {/* Recent projects */}
-      {!loading && projects.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
-              Your Projects
-            </h3>
+        {/* Error */}
+        {error && (
+          <div className="bg-red-950/30 border border-red-900/40 p-4 text-sm text-red-400 flex items-center gap-2">
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto text-red-500">✕</button>
           </div>
+        )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map((project) => (
+        {/* Loading */}
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 text-[#E8B931] animate-spin" />
+            <span className="text-sm text-[#666] ml-3">Loading projects...</span>
+          </div>
+        )}
+
+        {/* Recent projects */}
+        {!loading && projects.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                Your Projects
+              </h3>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {projects.map((project) => {
+                const isCompleted = project.status === "complete" || project.pages > 0;
+                return isCompleted ? (
+                  // Completed project - show preview on click
+                  <button
+                    key={project.id}
+                    onClick={() => handleProjectClick(project)}
+                    className="bg-[#111] border border-[#222] overflow-hidden block text-left w-full"
+                  >
+                    {/* Thumbnail area */}
+                    <div className={`h-36 bg-gradient-to-br ${getGradient(project.genre)} relative`}>
+                      {/* Comic panel grid pattern */}
+                      <div className="absolute inset-3 grid grid-cols-3 grid-rows-2 gap-1">
+                        <div className="bg-[#222]/40 col-span-2 row-span-2 rounded-sm" />
+                        <div className="bg-[#222]/40 rounded-sm" />
+                        <div className="bg-[#222]/40 rounded-sm" />
+                      </div>
+                      {/* Genre badge */}
+                      <div className="absolute top-3 right-3 text-[9px] tracking-widest uppercase text-[#666] border border-[#333]/60 px-2 py-0.5 bg-[#0A0A0A]/60">
+                        {project.genre}
+                      </div>
+                      {/* Preview indicator */}
+                      <div className="absolute bottom-3 left-3 flex items-center gap-1 text-[9px] text-[#E8B931] bg-[#0A0A0A]/80 px-2 py-1">
+                        <Eye className="w-3 h-3" /> Preview
+                      </div>
+                    </div>
+
+                    {/* Info */}
+                    <div className="p-4 space-y-2">
+                      <h4 className="text-sm font-bold text-[#F5F5F0]">
+                        {project.title}
+                      </h4>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#666]">
+                          {project.pages}/{project.totalPages} pages
+                        </span>
+                        <span
+                          className={`text-[10px] tracking-widest uppercase border px-2 py-0.5 ${getStatusColor(
+                            project.status
+                          )}`}
+                        >
+                          {getStatusLabel(project.status)}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-[#555]">
+                        Updated {timeAgo(project.updatedAt)}
+                      </div>
+                    </div>
+                  </button>
+                ) : (
+                  // In-progress project - link to workspace
+                  <Link
+                    key={project.id}
+                    href={`/dashboard/comic/${project.id}`}
+                    className="bg-[#111] border border-[#222] overflow-hidden block"
+                  >
+                    {/* Thumbnail area */}
+                    <div className={`h-36 bg-gradient-to-br ${getGradient(project.genre)} relative`}>
+                      {/* Comic panel grid pattern */}
+                      <div className="absolute inset-3 grid grid-cols-3 grid-rows-2 gap-1">
+                        <div className="bg-[#222]/40 col-span-2 row-span-2 rounded-sm" />
+                        <div className="bg-[#222]/40 rounded-sm" />
+                        <div className="bg-[#222]/40 rounded-sm" />
+                      </div>
+                      {/* Genre badge */}
+                      <div className="absolute top-3 right-3 text-[9px] tracking-widest uppercase text-[#666] border border-[#333]/60 px-2 py-0.5 bg-[#0A0A0A]/60">
+                        {project.genre}
+                      </div>
+                    </div>
+
+                    {/* Info */}
+                    <div className="p-4 space-y-2">
+                      <h4 className="text-sm font-bold text-[#F5F5F0]">
+                        {project.title}
+                      </h4>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#666]">
+                          {project.pages}/{project.totalPages} pages
+                        </span>
+                        <span
+                          className={`text-[10px] tracking-widest uppercase border px-2 py-0.5 ${getStatusColor(
+                            project.status
+                          )}`}
+                        >
+                          {getStatusLabel(project.status)}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-[#555]">
+                        Updated {timeAgo(project.updatedAt)}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+
+              {/* New project card */}
               <Link
-                key={project.id}
-                href={`/dashboard/comic/${project.id}`}
-                className="bg-[#111] border border-[#222] overflow-hidden block"
+                href="/dashboard/create"
+                className="bg-[#111] border border-dashed border-[#333] overflow-hidden block"
               >
-                {/* Thumbnail area */}
-                <div className={`h-36 bg-gradient-to-br ${getGradient(project.genre)} relative`}>
-                  {/* Comic panel grid pattern */}
-                  <div className="absolute inset-3 grid grid-cols-3 grid-rows-2 gap-1">
-                    <div className="bg-[#222]/40 col-span-2 row-span-2 rounded-sm" />
-                    <div className="bg-[#222]/40 rounded-sm" />
-                    <div className="bg-[#222]/40 rounded-sm" />
-                  </div>
-                  {/* Genre badge */}
-                  <div className="absolute top-3 right-3 text-[9px] tracking-widest uppercase text-[#666] border border-[#333]/60 px-2 py-0.5 bg-[#0A0A0A]/60">
-                    {project.genre}
-                  </div>
+                <div className="h-36 flex items-center justify-center">
+                  <Plus className="w-8 h-8 text-[#333]" />
                 </div>
-
-                {/* Info */}
-                <div className="p-4 space-y-2">
-                  <h4 className="text-sm font-bold text-[#F5F5F0]">
-                    {project.title}
+                <div className="p-4">
+                  <h4 className="text-sm font-bold text-[#555]">
+                    Create New Comic
                   </h4>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-[#666]">
-                      {project.pages}/{project.totalPages} pages
-                    </span>
-                    <span
-                      className={`text-[10px] tracking-widest uppercase border px-2 py-0.5 ${getStatusColor(
-                        project.status
-                      )}`}
-                    >
-                      {getStatusLabel(project.status)}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-[#555]">
-                    Updated {timeAgo(project.updatedAt)}
+                  <div className="text-xs text-[#444] mt-1">
+                    Start a new story from scratch
                   </div>
                 </div>
               </Link>
-            ))}
+            </div>
+          </div>
+        )}
 
-            {/* New project card */}
+        {/* Empty state */}
+        {!loading && projects.length === 0 && (
+          <div className="bg-[#111] border border-[#222] p-12 text-center">
+            <FolderOpen className="w-12 h-12 text-[#333] mx-auto mb-4" />
+            <h3 className="text-lg font-black text-[#F5F5F0] mb-2">No Projects Yet</h3>
+            <p className="text-sm text-[#666] mb-6 max-w-md mx-auto">
+              Create your first comic book with AI. Set up your story, characters, and world — then generate pages one by one.
+            </p>
             <Link
               href="/dashboard/create"
-              className="bg-[#111] border border-dashed border-[#333] overflow-hidden block"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs"
             >
-              <div className="h-36 flex items-center justify-center">
-                <Plus className="w-8 h-8 text-[#333]" />
-              </div>
-              <div className="p-4">
-                <h4 className="text-sm font-bold text-[#555]">
-                  Create New Comic
-                </h4>
-                <div className="text-xs text-[#444] mt-1">
-                  Start a new story from scratch
-                </div>
-              </div>
+              <Plus className="w-4 h-4" /> Create Your First Comic
             </Link>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Empty state */}
-      {!loading && projects.length === 0 && (
-        <div className="bg-[#111] border border-[#222] p-12 text-center">
-          <FolderOpen className="w-12 h-12 text-[#333] mx-auto mb-4" />
-          <h3 className="text-lg font-black text-[#F5F5F0] mb-2">No Projects Yet</h3>
-          <p className="text-sm text-[#666] mb-6 max-w-md mx-auto">
-            Create your first comic book with AI. Set up your story, characters, and world — then generate pages one by one.
-          </p>
-          <Link
-            href="/dashboard/create"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs"
-          >
-            <Plus className="w-4 h-4" /> Create Your First Comic
-          </Link>
-        </div>
-      )}
+        {/* Bottom row: Activity + Quick Actions */}
+        {!loading && projects.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Activity Timeline */}
+            <div className="lg:col-span-2 bg-[#111] border border-[#222] p-6">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-5">
+                Recent Activity
+              </h3>
+              <div className="space-y-4">
+                {activities.map((activity, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-[#E8B931] mt-1.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[#F5F5F0]">{activity.text}</p>
+                      <p className="text-xs text-[#555] mt-0.5">{activity.time}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-      {/* Bottom row: Activity + Quick Actions */}
-      {!loading && projects.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Activity Timeline */}
-          <div className="lg:col-span-2 bg-[#111] border border-[#222] p-6">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-5">
-              Recent Activity
-            </h3>
-            <div className="space-y-4">
-              {activities.map((activity, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-[#E8B931] mt-1.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#F5F5F0]">{activity.text}</p>
-                    <p className="text-xs text-[#555] mt-0.5">{activity.time}</p>
+            {/* Quick Actions */}
+            <div className="bg-[#111] border border-[#222] p-6">
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-5">
+                Quick Actions
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                {quickActions.map((action) => (
+                  <Link
+                    key={action.label}
+                    href={action.href}
+                    className="flex flex-col items-center justify-center gap-2 p-4 bg-[#0A0A0A] border border-[#222] text-center"
+                  >
+                    <action.icon className="w-5 h-5 text-[#E8B931]" />
+                    <span className="text-[10px] text-[#999] tracking-wider uppercase">
+                      {action.label}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Preview Modal */}
+      {showPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+          <div className="bg-[#0A0A0A] border border-[#222] w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-[#222]">
+              <div className="flex items-center gap-3">
+                <Eye className="w-5 h-5 text-[#E8B931]" />
+                <h3 className="text-lg font-bold text-[#F5F5F0]">
+                  {previewProject?.title || "Preview"}
+                </h3>
+                {previewProject && (
+                  <span className="text-xs text-[#666]">
+                    {previewProject.genre} • {getApprovedPagesCount()} pages
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={closePreview}
+                className="text-[#666] hover:text-[#F5F5F0] p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {loadingPreview ? (
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+                </div>
+              ) : previewProject ? (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Page Grid */}
+                  <div className="lg:col-span-2">
+                    <h4 className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase mb-4">
+                      All Pages
+                    </h4>
+                    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                      {previewProject.pages
+                        ?.filter((p) => p.status === "approved")
+                        .sort((a, b) => a.number - b.number)
+                        .map((page) => (
+                          <div
+                            key={page.id}
+                            className="bg-[#111] border border-[#222] p-2"
+                          >
+                            <div className="aspect-[3/4] bg-[#1A1A1A] border border-[#222] mb-2 flex items-center justify-center">
+                              <div className="text-center">
+                                <div className="text-lg font-bold text-[#E8B931]">
+                                  {page.number}
+                                </div>
+                                <div className="text-[8px] text-[#555] uppercase">
+                                  {page.panels?.length || 0} panels
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-[10px] font-bold text-[#F5F5F0] truncate">
+                              {page.title}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Export Options */}
+                  <div className="space-y-4">
+                    {/* Format Selection */}
+                    <div className="bg-[#111] border border-[#222] p-4">
+                      <h4 className="text-xs font-bold text-[#999] tracking-[0.15em] uppercase mb-3">
+                        Export Format
+                      </h4>
+                      <div className="space-y-2">
+                        {exportFormats.map((format) => (
+                          <button
+                            key={format.id}
+                            onClick={() => setSelectedFormat(format.id)}
+                            className={`w-full flex items-center gap-3 p-3 border transition-colors ${
+                              selectedFormat === format.id
+                                ? "border-[#E8B931] bg-[#E8B931]/5"
+                                : "border-[#222] hover:border-[#333]"
+                            }`}
+                          >
+                            <format.icon className="w-4 h-4 text-[#E8B931]" />
+                            <div className="flex-1 text-left">
+                              <div className="text-xs text-[#F5F5F0]">{format.name}</div>
+                            </div>
+                            {selectedFormat === format.id && (
+                              <Check className="w-4 h-4 text-[#E8B931]" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* PDF Settings */}
+                    {selectedFormat === "pdf" && (
+                      <div className="bg-[#111] border border-[#222] p-4">
+                        <h4 className="text-xs font-bold text-[#999] tracking-[0.15em] uppercase mb-3 flex items-center gap-2">
+                          <Settings2 className="w-3 h-3" /> PDF Settings
+                        </h4>
+
+                        {/* Font */}
+                        <div className="mb-4">
+                          <label className="text-[10px] text-[#666] uppercase tracking-wider mb-2 block flex items-center gap-1">
+                            <Type className="w-3 h-3" /> Font
+                          </label>
+                          <select
+                            value={pdfSettings.font}
+                            onChange={(e) =>
+                              setPdfSettings((prev) => ({ ...prev, font: e.target.value }))
+                            }
+                            className="w-full bg-[#0A0A0A] border border-[#222] text-xs text-[#F5F5F0] p-2"
+                          >
+                            {fontOptions.map((font) => (
+                              <option key={font.id} value={font.id}>
+                                {font.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Options */}
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 text-[10px] text-[#999]">
+                            <input
+                              type="checkbox"
+                              checked={pdfSettings.includeCover}
+                              onChange={(e) =>
+                                setPdfSettings((prev) => ({
+                                  ...prev,
+                                  includeCover: e.target.checked,
+                                }))
+                              }
+                              className="accent-[#E8B931]"
+                            />
+                            Include cover page
+                          </label>
+                          <label className="flex items-center gap-2 text-[10px] text-[#999]">
+                            <input
+                              type="checkbox"
+                              checked={pdfSettings.includeToc}
+                              onChange={(e) =>
+                                setPdfSettings((prev) => ({
+                                  ...prev,
+                                  includeToc: e.target.checked,
+                                }))
+                              }
+                              className="accent-[#E8B931]"
+                            />
+                            Include table of contents
+                          </label>
+                          <label className="flex items-center gap-2 text-[10px] text-[#999]">
+                            <input
+                              type="checkbox"
+                              checked={pdfSettings.includePageNumbers}
+                              onChange={(e) =>
+                                setPdfSettings((prev) => ({
+                                  ...prev,
+                                  includePageNumbers: e.target.checked,
+                                }))
+                              }
+                              className="accent-[#E8B931]"
+                            />
+                            Include page numbers
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Download Button */}
+                    <button
+                      onClick={handleExport}
+                      disabled={exporting}
+                      className="w-full py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {exporting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Exporting...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Download {exportFormats.find((f) => f.id === selectedFormat)?.name}
+                        </>
+                      )}
+                    </button>
+
+                    {/* Continue Editing Link */}
+                    <Link
+                      href={`/dashboard/comic/${previewProject.id}`}
+                      onClick={closePreview}
+                      className="block w-full py-3 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase text-center"
+                    >
+                      Continue Editing
+                    </Link>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="bg-[#111] border border-[#222] p-6">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-5">
-              Quick Actions
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              {quickActions.map((action) => (
-                <Link
-                  key={action.label}
-                  href={action.href}
-                  className="flex flex-col items-center justify-center gap-2 p-4 bg-[#0A0A0A] border border-[#222] text-center"
-                >
-                  <action.icon className="w-5 h-5 text-[#E8B931]" />
-                  <span className="text-[10px] text-[#999] tracking-wider uppercase">
-                    {action.label}
-                  </span>
-                </Link>
-              ))}
+              ) : null}
             </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

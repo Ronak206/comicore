@@ -6,14 +6,20 @@ import {
   Download,
   FileText,
   Archive,
-  CheckCircle2,
   Image,
   Loader2,
   AlertTriangle,
   ArrowLeft,
+  Eye,
+  Check,
+  Type,
+  Palette,
+  Settings2,
+  ChevronRight,
+  BookOpen,
 } from "lucide-react";
 
-type ExportTab = "new" | "history" | "formats";
+type ExportStep = "select" | "preview" | "customize" | "download";
 
 interface Project {
   id: string;
@@ -22,8 +28,38 @@ interface Project {
   status: string;
   pages: number;
   totalPages: number;
+  synopsis?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+interface ProjectDetail {
+  id: string;
+  title: string;
+  genre: string;
+  synopsis: string;
+  tone: string;
+  status: string;
+  pageGoal: number;
+  currentPage: number;
+  pages: Array<{
+    id: string;
+    number: number;
+    title: string;
+    status: string;
+    panels: Array<{
+      panelNumber: number;
+      description: string;
+      dialogue: Array<{
+        character: string;
+        text: string;
+        type: string;
+      }>;
+      cameraAngle: string;
+      mood: string;
+    }>;
+    script: string;
+  }>;
 }
 
 interface ExportRecord {
@@ -42,50 +78,73 @@ const exportFormats = [
     id: "pdf",
     name: "PDF",
     icon: FileText,
-    description: "Print-ready document with cover page, table of contents, and all pages in order. Best for reading on screens and printing.",
-    features: ["Cover page", "Table of contents", "Page numbers", "High quality (300 DPI)", "Single file"],
-    recommended: "Reading / Sharing",
+    description: "Print-ready document with cover page and table of contents.",
     ext: ".pdf",
   },
   {
     id: "cbz",
     name: "CBZ",
     icon: Archive,
-    description: "Standard comic archive format. ZIP-based container with numbered page images. Readable by all comic reader apps.",
-    features: ["Numbered pages", "High-res images", "Metadata included", "Compatible with CBR/CBZ readers", "Lossless quality"],
-    recommended: "Comic Readers / Archive",
+    description: "Standard comic archive format for comic reader apps.",
     ext: ".cbz",
   },
   {
     id: "images",
-    name: "PNG Sequence",
+    name: "PNG Images",
     icon: Image,
-    description: "Individual high-resolution PNG images for each page. Maximum quality with transparency support. Ideal for further editing.",
-    features: ["Individual PNG files", "300 DPI minimum", "Transparent backgrounds", "Named by page number", "ZIP archive"],
-    recommended: "Editing / Print Production",
+    description: "Individual high-resolution PNG images in ZIP.",
     ext: ".zip",
   },
 ];
 
+const fontOptions = [
+  { id: "helvetica", name: "Helvetica", description: "Clean, modern sans-serif" },
+  { id: "times", name: "Times Roman", description: "Classic, elegant serif" },
+  { id: "courier", name: "Courier", description: "Monospace, typewriter style" },
+];
+
+const colorOptions = [
+  { id: "white", name: "White", value: "#FFFFFF" },
+  { id: "cream", name: "Cream", value: "#FFFDD0" },
+  { id: "lightgray", name: "Light Gray", value: "#F0F0F0" },
+  { id: "sepia", name: "Sepia", value: "#F4ECD8" },
+];
+
 export default function ExportPage() {
-  const [activeTab, setActiveTab] = useState<ExportTab>("new");
+  const [step, setStep] = useState<ExportStep>("select");
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedProject, setSelectedProject] = useState<ProjectDetail | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingProject, setLoadingProject] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [exportHistory, setExportHistory] = useState<ExportRecord[]>([]);
 
-  // Fetch projects from database
+  // PDF customization settings
+  const [pdfSettings, setPdfSettings] = useState({
+    font: "helvetica",
+    bgColor: "#FFFFFF",
+    fontSize: 10,
+    includeCover: true,
+    includeToc: true,
+    includePageNumbers: true,
+  });
+
+  // Fetch completed projects from database
   const fetchProjects = useCallback(async () => {
     try {
       setLoading(true);
       const res = await fetch("/api/engine/projects");
       const data = await res.json();
-      
+
       if (data.success) {
-        setProjects(data.data || []);
+        // Only show completed projects
+        const completed = (data.data || []).filter(
+          (p: Project) => p.status === "complete" || p.pages > 0
+        );
+        setProjects(completed);
       } else {
         setError(data.error || "Failed to load projects");
       }
@@ -100,10 +159,42 @@ export default function ExportPage() {
     fetchProjects();
   }, [fetchProjects]);
 
+  // Fetch full project details for preview
+  const fetchProjectDetail = async (projectId: string) => {
+    try {
+      setLoadingProject(true);
+      const res = await fetch(`/api/engine/project/${projectId}`);
+      const data = await res.json();
+
+      if (data.success) {
+        setSelectedProject(data.data);
+        setSelectedProjectId(projectId);
+        setStep("preview");
+      } else {
+        setError(data.error || "Failed to load project");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to load project");
+    } finally {
+      setLoadingProject(false);
+    }
+  };
+
+  // Handle project selection
+  const handleSelectProject = (project: Project) => {
+    fetchProjectDetail(project.id);
+  };
+
+  // Handle format selection and move to customize step
+  const handleSelectFormat = (formatId: string) => {
+    setSelectedFormat(formatId);
+    setStep("customize");
+  };
+
   // Handle export
   const handleExport = async () => {
     if (!selectedProject || !selectedFormat) return;
-    
+
     setExporting(true);
     setError(null);
 
@@ -111,7 +202,7 @@ export default function ExportPage() {
       let endpoint = "/api/export/pdf";
       let filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}.pdf`;
       let mimeType = "application/pdf";
-      
+
       if (selectedFormat === "cbz") {
         endpoint = "/api/export/cbz";
         filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}.cbz`;
@@ -121,7 +212,7 @@ export default function ExportPage() {
         filename = `${selectedProject.title.replace(/\s+/g, "-").toLowerCase()}-pages.zip`;
         mimeType = "application/zip";
       }
-      
+
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -129,6 +220,12 @@ export default function ExportPage() {
           sessionId: selectedProject.id,
           options: {
             title: selectedProject.title,
+            font: pdfSettings.font,
+            bgColor: pdfSettings.bgColor,
+            fontSize: pdfSettings.fontSize,
+            includeCover: pdfSettings.includeCover,
+            includeToc: pdfSettings.includeToc,
+            includePageNumbers: pdfSettings.includePageNumbers,
             metadata: {
               title: selectedProject.title,
               author: "Comicore AI",
@@ -136,29 +233,25 @@ export default function ExportPage() {
           },
         }),
       });
-      
-      // Check if response is a file or JSON error
+
       const contentType = res.headers.get("content-type") || "";
-      
+
       if (contentType.includes("application/json")) {
-        // Handle JSON response (likely an error)
         const data = await res.json();
         if (!data.success) {
           setError(data.error || "Export failed");
           return;
         }
       }
-      
+
       if (!res.ok) {
         setError("Export failed. Please try again.");
         return;
       }
-      
-      // Get the file blob
+
       const blob = await res.blob();
       const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
-      
-      // Create download link and trigger download
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -167,20 +260,22 @@ export default function ExportPage() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       // Add to export history
       const newExport: ExportRecord = {
         id: `export_${Date.now()}`,
         projectId: selectedProject.id,
         comicTitle: selectedProject.title,
         format: selectedFormat.toUpperCase(),
-        pages: selectedProject.pages,
+        pages: selectedProject.pages?.filter((p) => p.status === "approved").length || 0,
         size: `${sizeMB} MB`,
         date: "Just now",
         status: "completed",
       };
       setExportHistory((prev) => [newExport, ...prev]);
-      
+
+      // Move to download step
+      setStep("download");
     } catch (err: any) {
       setError(err.message || "Export failed");
     } finally {
@@ -188,13 +283,20 @@ export default function ExportPage() {
     }
   };
 
-  // Get ready comics (completed or has approved pages)
-  const readyProjects = projects.filter((p) => p.status === "complete" || p.pages > 0);
+  // Reset to select step
+  const handleReset = () => {
+    setStep("select");
+    setSelectedProject(null);
+    setSelectedProjectId(null);
+    setSelectedFormat(null);
+    setError(null);
+  };
 
-  // Stats
-  const totalExports = exportHistory.length;
-  const readyCount = readyProjects.length;
-  const totalPages = projects.reduce((sum, p) => sum + p.pages, 0);
+  // Get approved pages count
+  const getApprovedPagesCount = () => {
+    if (!selectedProject?.pages) return 0;
+    return selectedProject.pages.filter((p) => p.status === "approved").length;
+  };
 
   if (loading) {
     return (
@@ -212,6 +314,12 @@ export default function ExportPage() {
           <ArrowLeft className="w-3 h-3" />
           Dashboard
         </Link>
+        {selectedProject && (
+          <>
+            <ChevronRight className="w-3 h-3" />
+            <span className="text-[#F5F5F0]">{selectedProject.title}</span>
+          </>
+        )}
       </div>
 
       {/* Page header */}
@@ -220,7 +328,7 @@ export default function ExportPage() {
           <span className="text-stroke">EXPORT</span> Comics
         </h2>
         <p className="text-sm text-[#666]">
-          Download your finished comics in multiple formats.
+          Download your finished comics in multiple formats with preview.
         </p>
       </div>
 
@@ -229,304 +337,524 @@ export default function ExportPage() {
         <div className="bg-red-950/30 border border-red-900/40 p-4 text-sm text-red-400 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           {error}
-          <button onClick={() => setError(null)} className="ml-auto text-red-500">✕</button>
+          <button onClick={() => setError(null)} className="ml-auto text-red-500">
+            ✕
+          </button>
         </div>
       )}
 
-      {/* Export stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Exports</div>
-          <div className="text-2xl font-black text-[#E8B931]">{totalExports}</div>
-          <div className="text-xs text-[#555]">All time</div>
-        </div>
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Ready Comics</div>
-          <div className="text-2xl font-black text-[#E8B931]">{readyCount}</div>
-          <div className="text-xs text-[#555]">Available now</div>
-        </div>
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Pages</div>
-          <div className="text-2xl font-black text-[#E8B931]">{totalPages}</div>
-          <div className="text-xs text-[#555]">Across all projects</div>
-        </div>
-        <div className="bg-[#111] border border-[#222] p-4">
-          <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Formats</div>
-          <div className="text-2xl font-black text-[#E8B931]">3</div>
-          <div className="text-xs text-[#555]">PDF, CBZ, PNG</div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-[#222]">
-        {[
-          { key: "new" as ExportTab, label: "New Export" },
-          { key: "history" as ExportTab, label: "History" },
-          { key: "formats" as ExportTab, label: "Formats" },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-3 text-xs tracking-widest uppercase transition-colors ${
-              activeTab === tab.key
-                ? "text-[#E8B931] border-b-2 border-[#E8B931]"
-                : "text-[#666]"
-            }`}
-          >
-            {tab.label}
-          </button>
+      {/* Progress Steps */}
+      <div className="flex items-center gap-2">
+        {["select", "preview", "customize", "download"].map((s, i) => (
+          <div key={s} className="flex items-center">
+            <div
+              className={`w-8 h-8 flex items-center justify-center text-xs font-bold border ${
+                step === s
+                  ? "border-[#E8B931] text-[#E8B931] bg-[#E8B931]/10"
+                  : i < ["select", "preview", "customize", "download"].indexOf(step)
+                  ? "border-[#E8B931]/40 text-[#E8B931]"
+                  : "border-[#333] text-[#555]"
+              }`}
+            >
+              {i + 1}
+            </div>
+            {i < 3 && (
+              <div
+                className={`w-8 h-0.5 ${
+                  i < ["select", "preview", "customize", "download"].indexOf(step)
+                    ? "bg-[#E8B931]/40"
+                    : "bg-[#333]"
+                }`}
+              />
+            )}
+          </div>
         ))}
       </div>
 
-      {/* Tab Content */}
-      {activeTab === "new" && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Step 1: Select comic */}
+      {/* ========== STEP 1: SELECT PROJECT ========== */}
+      {step === "select" && (
+        <div className="space-y-6">
           <div className="bg-[#111] border border-[#222] p-6">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-1">
-              Step 1
+            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
+              Select a Completed Project
             </h3>
-            <h4 className="text-sm font-bold text-[#F5F5F0] mb-4">Select Comic</h4>
-            
-            {readyProjects.length > 0 ? (
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {readyProjects.map((project) => (
+
+            {projects.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {projects.map((project) => (
                   <button
                     key={project.id}
-                    onClick={() => setSelectedProject(project)}
-                    className={`w-full text-left p-3 border transition-colors ${
-                      selectedProject?.id === project.id
+                    onClick={() => handleSelectProject(project)}
+                    disabled={loadingProject}
+                    className={`text-left p-4 border transition-all hover:border-[#E8B931]/50 ${
+                      selectedProjectId === project.id
                         ? "border-[#E8B931] bg-[#E8B931]/5"
-                        : "border-[#222] bg-[#0A0A0A] hover:border-[#333]"
+                        : "border-[#222] bg-[#0A0A0A]"
                     }`}
                   >
-                    <div className="text-sm font-medium text-[#F5F5F0]">{project.title}</div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-[#666]">{project.pages} / {project.totalPages} pages</span>
-                      <span className="text-[10px] text-[#555] border border-[#333] px-1">{project.status}</span>
+                    <div className="flex items-start justify-between mb-2">
+                      <h4 className="text-sm font-bold text-[#F5F5F0]">{project.title}</h4>
+                      <span
+                        className={`text-[10px] tracking-widest uppercase border px-2 py-0.5 ${
+                          project.status === "complete"
+                            ? "border-[#E8B931]/40 text-[#E8B931]"
+                            : "border-[#555]/40 text-[#555]"
+                        }`}
+                      >
+                        {project.status === "complete" ? "Completed" : "In Progress"}
+                      </span>
                     </div>
+                    <div className="text-xs text-[#666] mb-1">{project.genre}</div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-[#555]">
+                        {project.pages}/{project.totalPages} pages
+                      </span>
+                      <span className="text-xs text-[#444]">
+                        Updated {new Date(project.updatedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {project.synopsis && (
+                      <p className="text-xs text-[#555] mt-2 line-clamp-2">{project.synopsis}</p>
+                    )}
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8">
-                <Download className="w-8 h-8 text-[#333] mx-auto mb-3" />
-                <p className="text-sm text-[#555]">No comics ready for export.</p>
+              <div className="text-center py-12">
+                <BookOpen className="w-12 h-12 text-[#333] mx-auto mb-4" />
+                <p className="text-sm text-[#555] mb-2">No completed projects available for export.</p>
+                <p className="text-xs text-[#444]">
+                  Create and complete a comic project first.
+                </p>
                 <Link
                   href="/dashboard/create"
-                  className="mt-4 inline-block px-4 py-2 text-xs bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase"
+                  className="mt-4 inline-block px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase text-xs"
                 >
-                  Create Your First Comic
+                  Create New Comic
                 </Link>
               </div>
             )}
           </div>
+        </div>
+      )}
 
-          {/* Step 2: Select format */}
+      {/* ========== STEP 2: PREVIEW ========== */}
+      {step === "preview" && selectedProject && (
+        <div className="space-y-6">
+          {/* Project Info */}
           <div className="bg-[#111] border border-[#222] p-6">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-1">
-              Step 2
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-[#F5F5F0]">{selectedProject.title}</h3>
+                <p className="text-xs text-[#666]">
+                  {selectedProject.genre} • {getApprovedPagesCount()} approved pages
+                </p>
+              </div>
+              <button
+                onClick={handleReset}
+                className="text-xs text-[#666] tracking-wide uppercase"
+              >
+                Change Project
+              </button>
+            </div>
+            {selectedProject.synopsis && (
+              <p className="text-sm text-[#999]">{selectedProject.synopsis}</p>
+            )}
+          </div>
+
+          {/* Page Preview Grid */}
+          <div className="bg-[#111] border border-[#222] p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Eye className="w-4 h-4 text-[#E8B931]" />
+              <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                Page Preview
+              </h3>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+              {selectedProject.pages
+                ?.filter((p) => p.status === "approved")
+                .sort((a, b) => a.number - b.number)
+                .map((page) => (
+                  <div
+                    key={page.id}
+                    className="bg-[#0A0A0A] border border-[#222] p-3 hover:border-[#333] transition-colors"
+                  >
+                    <div className="aspect-[3/4] bg-[#1A1A1A] border border-[#222] mb-2 flex items-center justify-center">
+                      <div className="text-center p-2">
+                        <div className="text-lg font-bold text-[#E8B931] mb-1">
+                          {page.number}
+                        </div>
+                        <div className="text-[8px] text-[#555] uppercase tracking-wider">
+                          {page.panels?.length || 0} panels
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-[10px] font-bold text-[#F5F5F0] truncate">
+                      {page.title}
+                    </div>
+                    <div className="text-[9px] text-[#555] mt-1">
+                      {page.script?.substring(0, 50)}...
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          {/* Format Selection */}
+          <div className="bg-[#111] border border-[#222] p-6">
+            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
+              Select Export Format
             </h3>
-            <h4 className="text-sm font-bold text-[#F5F5F0] mb-4">Select Format</h4>
-            <div className="space-y-2">
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {exportFormats.map((format) => (
                 <button
                   key={format.id}
-                  onClick={() => setSelectedFormat(format.id)}
-                  disabled={!selectedProject}
-                  className={`w-full text-left p-3 border transition-colors ${
+                  onClick={() => handleSelectFormat(format.id)}
+                  className={`text-left p-4 border transition-all hover:border-[#E8B931]/50 ${
                     selectedFormat === format.id
                       ? "border-[#E8B931] bg-[#E8B931]/5"
-                      : selectedProject
-                      ? "border-[#222] bg-[#0A0A0A] hover:border-[#333]"
-                      : "border-[#222] bg-[#0A0A0A] opacity-50 cursor-not-allowed"
+                      : "border-[#222] bg-[#0A0A0A]"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <format.icon className="w-4 h-4 text-[#E8B931]" />
-                    <span className="text-sm font-medium text-[#F5F5F0]">{format.name}</span>
+                  <div className="flex items-center gap-3 mb-2">
+                    <format.icon className="w-5 h-5 text-[#E8B931]" />
+                    <span className="text-sm font-bold text-[#F5F5F0]">{format.name}</span>
                     <span className="text-[10px] text-[#555] ml-auto">{format.ext}</span>
                   </div>
-                  <div className="text-[10px] text-[#666] mt-1">{format.recommended}</div>
+                  <p className="text-xs text-[#666]">{format.description}</p>
                 </button>
               ))}
             </div>
           </div>
-
-          {/* Step 3: Export */}
-          <div className="bg-[#111] border border-[#222] p-6">
-            <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-1">
-              Step 3
-            </h3>
-            <h4 className="text-sm font-bold text-[#F5F5F0] mb-4">Export</h4>
-
-            {selectedProject && selectedFormat ? (
-              <div className="space-y-4">
-                {/* Summary */}
-                <div className="bg-[#0A0A0A] border border-[#222] p-4 space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-xs text-[#666] uppercase tracking-wider">Comic</span>
-                    <span className="text-xs text-[#F5F5F0] font-medium">{selectedProject.title}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-xs text-[#666] uppercase tracking-wider">Format</span>
-                    <span className="text-xs text-[#F5F5F0] font-medium">
-                      {exportFormats.find((f) => f.id === selectedFormat)?.name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-xs text-[#666] uppercase tracking-wider">Pages</span>
-                    <span className="text-xs text-[#F5F5F0] font-medium">{selectedProject.pages}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-xs text-[#666] uppercase tracking-wider">Status</span>
-                    <span className="text-xs text-[#E8B931] font-medium">{selectedProject.status}</span>
-                  </div>
-                </div>
-
-                {/* Export options */}
-                <div className="space-y-3">
-                  <label className="flex items-center gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
-                    <input type="checkbox" defaultChecked className="accent-[#E8B931]" />
-                    <span className="text-xs text-[#999]">Include cover page</span>
-                  </label>
-                  <label className="flex items-center gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
-                    <input type="checkbox" defaultChecked className="accent-[#E8B931]" />
-                    <span className="text-xs text-[#999]">High quality (300 DPI)</span>
-                  </label>
-                  <label className="flex items-center gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
-                    <input type="checkbox" className="accent-[#E8B931]" />
-                    <span className="text-xs text-[#999]">Add page numbers</span>
-                  </label>
-                </div>
-
-                {/* Export button */}
-                <button
-                  onClick={handleExport}
-                  disabled={exporting}
-                  className="w-full py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {exporting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Exporting...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="w-4 h-4" />
-                      Export Now
-                    </>
-                  )}
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Download className="w-10 h-10 text-[#333] mb-4" />
-                <p className="text-sm text-[#555]">
-                  {projects.length === 0 
-                    ? "Create a comic first to enable export."
-                    : "Select a comic and format to start exporting."}
-                </p>
-                {projects.length === 0 && (
-                  <Link
-                    href="/dashboard/create"
-                    className="mt-4 px-4 py-2 text-xs bg-[#E8B931] text-[#0A0A0A] font-bold tracking-wide uppercase"
-                  >
-                    Create Comic
-                  </Link>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       )}
 
-      {activeTab === "history" && (
-        <div className="bg-[#111] border border-[#222] overflow-hidden">
-          {exportHistory.length > 0 ? (
-            <>
-              {/* Table header */}
-              <div className="grid grid-cols-5 gap-4 px-6 py-3 border-b border-[#222]">
-                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Comic</span>
-                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Format</span>
-                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Size</span>
-                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase">Date</span>
-                <span className="text-[10px] text-[#E8B931] tracking-[0.2em] uppercase text-right">Action</span>
-              </div>
-              {/* Rows */}
-              {exportHistory.map((item) => (
-                <div key={item.id} className="grid grid-cols-5 gap-4 px-6 py-4 border-b border-[#222]/50 items-center">
-                  <div>
-                    <div className="text-sm text-[#F5F5F0]">{item.comicTitle}</div>
-                    <div className="text-[10px] text-[#555]">{item.pages} pages</div>
-                  </div>
-                  <div>
-                    <span className="text-[10px] tracking-widest uppercase border border-[#E8B931]/30 text-[#E8B931] px-2 py-0.5">
-                      {item.format}
-                    </span>
-                  </div>
-                  <div className="text-xs text-[#666]">{item.size}</div>
-                  <div className="text-xs text-[#555]">{item.date}</div>
-                  <div className="flex justify-end">
-                    <button className="flex items-center gap-1 text-xs text-[#E8B931] tracking-wide uppercase">
-                      <Download className="w-3 h-3" />
-                      Re-download
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className="text-center py-12">
-              <Download className="w-10 h-10 text-[#333] mx-auto mb-4" />
-              <p className="text-sm text-[#555]">No export history yet.</p>
-              <p className="text-xs text-[#444] mt-1">Your exported comics will appear here.</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === "formats" && (
+      {/* ========== STEP 3: CUSTOMIZE ========== */}
+      {step === "customize" && selectedProject && selectedFormat && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {exportFormats.map((format) => (
-              <div key={format.id} className="bg-[#111] border border-[#222] p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-[#E8B931]/10 flex items-center justify-center">
-                    <format.icon className="w-5 h-5 text-[#E8B931]" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold text-[#F5F5F0]">{format.name}</div>
-                    <div className="text-[10px] text-[#E8B931] tracking-widest uppercase">
-                      {format.ext}
-                    </div>
-                  </div>
+          {/* Back button */}
+          <button
+            onClick={() => setStep("preview")}
+            className="flex items-center gap-2 text-xs text-[#666] tracking-wide uppercase"
+          >
+            <ArrowLeft className="w-3 h-3" /> Back to Preview
+          </button>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* PDF Settings (only for PDF format) */}
+            {selectedFormat === "pdf" && (
+              <div className="bg-[#111] border border-[#222] p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Settings2 className="w-4 h-4 text-[#E8B931]" />
+                  <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                    PDF Settings
+                  </h3>
                 </div>
 
-                <p className="text-xs text-[#666] leading-relaxed mb-4">
-                  {format.description}
-                </p>
-
-                <div className="border-t border-[#222] pt-4">
-                  <div className="text-[10px] text-[#555] tracking-widest uppercase mb-3">Features</div>
+                {/* Font Selection */}
+                <div className="mb-6">
+                  <label className="text-xs text-[#999] tracking-wider uppercase mb-3 block flex items-center gap-2">
+                    <Type className="w-3 h-3" /> Font Style
+                  </label>
                   <div className="space-y-2">
-                    {format.features.map((feature) => (
-                      <div key={feature} className="flex items-center gap-2">
-                        <div className="w-1 h-1 bg-[#E8B931] flex-shrink-0" />
-                        <span className="text-xs text-[#999]">{feature}</span>
-                      </div>
+                    {fontOptions.map((font) => (
+                      <button
+                        key={font.id}
+                        onClick={() =>
+                          setPdfSettings((prev) => ({ ...prev, font: font.id }))
+                        }
+                        className={`w-full text-left p-3 border transition-colors ${
+                          pdfSettings.font === font.id
+                            ? "border-[#E8B931] bg-[#E8B931]/5"
+                            : "border-[#222] bg-[#0A0A0A] hover:border-[#333]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-sm text-[#F5F5F0]">{font.name}</div>
+                            <div className="text-[10px] text-[#555]">
+                              {font.description}
+                            </div>
+                          </div>
+                          {pdfSettings.font === font.id && (
+                            <Check className="w-4 h-4 text-[#E8B931]" />
+                          )}
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-[#222]">
-                  <div className="text-[10px] text-[#555] tracking-widest uppercase">
-                    Best for: {format.recommended}
+                {/* Background Color */}
+                <div className="mb-6">
+                  <label className="text-xs text-[#999] tracking-wider uppercase mb-3 block flex items-center gap-2">
+                    <Palette className="w-3 h-3" /> Background Color
+                  </label>
+                  <div className="flex gap-2">
+                    {colorOptions.map((color) => (
+                      <button
+                        key={color.id}
+                        onClick={() =>
+                          setPdfSettings((prev) => ({ ...prev, bgColor: color.value }))
+                        }
+                        className={`w-10 h-10 border-2 transition-all ${
+                          pdfSettings.bgColor === color.value
+                            ? "border-[#E8B931]"
+                            : "border-[#333] hover:border-[#555]"
+                        }`}
+                        style={{ backgroundColor: color.value }}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Font Size */}
+                <div className="mb-6">
+                  <label className="text-xs text-[#999] tracking-wider uppercase mb-3 block">
+                    Font Size: {pdfSettings.fontSize}pt
+                  </label>
+                  <input
+                    type="range"
+                    min="8"
+                    max="14"
+                    value={pdfSettings.fontSize}
+                    onChange={(e) =>
+                      setPdfSettings((prev) => ({
+                        ...prev,
+                        fontSize: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full accent-[#E8B931]"
+                  />
+                  <div className="flex justify-between text-[10px] text-[#555] mt-1">
+                    <span>8pt</span>
+                    <span>14pt</span>
+                  </div>
+                </div>
+
+                {/* Options */}
+                <div className="space-y-3">
+                  <label className="flex items-center gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
+                    <input
+                      type="checkbox"
+                      checked={pdfSettings.includeCover}
+                      onChange={(e) =>
+                        setPdfSettings((prev) => ({
+                          ...prev,
+                          includeCover: e.target.checked,
+                        }))
+                      }
+                      className="accent-[#E8B931]"
+                    />
+                    <span className="text-xs text-[#999]">Include cover page</span>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
+                    <input
+                      type="checkbox"
+                      checked={pdfSettings.includeToc}
+                      onChange={(e) =>
+                        setPdfSettings((prev) => ({
+                          ...prev,
+                          includeToc: e.target.checked,
+                        }))
+                      }
+                      className="accent-[#E8B931]"
+                    />
+                    <span className="text-xs text-[#999]">Include table of contents</span>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 bg-[#0A0A0A] border border-[#222]">
+                    <input
+                      type="checkbox"
+                      checked={pdfSettings.includePageNumbers}
+                      onChange={(e) =>
+                        setPdfSettings((prev) => ({
+                          ...prev,
+                          includePageNumbers: e.target.checked,
+                        }))
+                      }
+                      className="accent-[#E8B931]"
+                    />
+                    <span className="text-xs text-[#999]">Include page numbers</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Export Summary */}
+            <div className="space-y-4">
+              <div className="bg-[#111] border border-[#222] p-6">
+                <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
+                  Export Summary
+                </h3>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between py-2 border-b border-[#222]">
+                    <span className="text-xs text-[#666] uppercase tracking-wider">
+                      Comic Title
+                    </span>
+                    <span className="text-xs text-[#F5F5F0] font-medium">
+                      {selectedProject.title}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-[#222]">
+                    <span className="text-xs text-[#666] uppercase tracking-wider">
+                      Format
+                    </span>
+                    <span className="text-xs text-[#F5F5F0] font-medium">
+                      {exportFormats.find((f) => f.id === selectedFormat)?.name}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-[#222]">
+                    <span className="text-xs text-[#666] uppercase tracking-wider">
+                      Pages
+                    </span>
+                    <span className="text-xs text-[#F5F5F0] font-medium">
+                      {getApprovedPagesCount()} pages
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-[#222]">
+                    <span className="text-xs text-[#666] uppercase tracking-wider">
+                      Genre
+                    </span>
+                    <span className="text-xs text-[#F5F5F0] font-medium">
+                      {selectedProject.genre}
+                    </span>
+                  </div>
+                  {selectedFormat === "pdf" && (
+                    <>
+                      <div className="flex justify-between py-2 border-b border-[#222]">
+                        <span className="text-xs text-[#666] uppercase tracking-wider">
+                          Font
+                        </span>
+                        <span className="text-xs text-[#F5F5F0] font-medium">
+                          {fontOptions.find((f) => f.id === pdfSettings.font)?.name}
+                        </span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-[#222]">
+                        <span className="text-xs text-[#666] uppercase tracking-wider">
+                          Font Size
+                        </span>
+                        <span className="text-xs text-[#F5F5F0] font-medium">
+                          {pdfSettings.fontSize}pt
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-[#222]">
+                  <button
+                    onClick={handleExport}
+                    disabled={exporting}
+                    className="w-full py-4 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.15em] uppercase text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {exporting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Exporting...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Generate & Download
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Preview */}
+              <div className="bg-[#111] border border-[#222] p-6">
+                <h3 className="text-xs font-bold text-[#999] tracking-[0.2em] uppercase mb-4">
+                  Quick Content Preview
+                </h3>
+                <div className="bg-[#0A0A0A] border border-[#222] p-4 max-h-[200px] overflow-y-auto">
+                  <div className="space-y-3 text-xs text-[#666]">
+                    {selectedProject.pages
+                      ?.filter((p) => p.status === "approved")
+                      .slice(0, 3)
+                      .map((page) => (
+                        <div key={page.id} className="pb-2 border-b border-[#222] last:border-0">
+                          <div className="text-[#E8B931] font-bold mb-1">
+                            Page {page.number}: {page.title}
+                          </div>
+                          <p className="text-[10px] line-clamp-2">{page.script}</p>
+                        </div>
+                      ))}
+                    {getApprovedPagesCount() > 3 && (
+                      <p className="text-[10px] text-[#444] italic">
+                        ...and {getApprovedPagesCount() - 3} more pages
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* ========== STEP 4: DOWNLOAD COMPLETE ========== */}
+      {step === "download" && selectedProject && selectedFormat && (
+        <div className="space-y-6">
+          <div className="bg-[#111] border border-[#E8B931]/30 p-8 text-center">
+            <div className="w-16 h-16 bg-[#E8B931]/10 mx-auto mb-4 flex items-center justify-center">
+              <Check className="w-8 h-8 text-[#E8B931]" />
+            </div>
+            <h3 className="text-xl font-black text-[#F5F5F0] mb-2">Export Complete!</h3>
+            <p className="text-sm text-[#666] mb-6">
+              Your comic has been exported as{" "}
+              {exportFormats.find((f) => f.id === selectedFormat)?.name} and downloaded.
+            </p>
+
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={handleReset}
+                className="px-6 py-3 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase"
+              >
+                Export Another
+              </button>
+              <Link
+                href="/dashboard"
+                className="px-6 py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs"
+              >
+                Back to Dashboard
+              </Link>
+            </div>
+          </div>
+
+          {/* Export History */}
+          {exportHistory.length > 0 && (
+            <div className="bg-[#111] border border-[#222] overflow-hidden">
+              <div className="px-6 py-4 border-b border-[#222]">
+                <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase">
+                  Recent Exports
+                </h3>
+              </div>
+              {exportHistory.slice(0, 5).map((item) => (
+                <div
+                  key={item.id}
+                  className="px-6 py-3 border-b border-[#222]/50 flex items-center justify-between"
+                >
+                  <div>
+                    <div className="text-sm text-[#F5F5F0]">{item.comicTitle}</div>
+                    <div className="text-[10px] text-[#555]">
+                      {item.pages} pages • {item.size}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-[#E8B931] tracking-widest uppercase border border-[#E8B931]/30 px-2 py-0.5">
+                      {item.format}
+                    </span>
+                    <span className="text-xs text-[#555]">{item.date}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

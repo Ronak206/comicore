@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Zap,
   Loader2,
-  FileText,
 } from "lucide-react";
 
 const sidebarItems = [
@@ -27,7 +26,6 @@ const sidebarItems = [
   { icon: BookOpen, label: "My Comics", href: "/dashboard" },
   { icon: Plus, label: "Create New", href: "/dashboard/create", highlight: true },
   { icon: Brain, label: "Memory Bank", href: "/dashboard/memory" },
-  { icon: FileText, label: "Text to PDF", href: "/dashboard/text-to-pdf" },
   { icon: Download, label: "Export", href: "/dashboard/export" },
   { icon: Settings, label: "Settings", href: "/dashboard/settings" },
 ];
@@ -191,7 +189,7 @@ export default function DashboardLayout({
                 {pathname === "/dashboard/export" && "Export"}
                 {pathname === "/dashboard/settings" && "Settings"}
                 {pathname === "/dashboard/create" && "Create New Comic"}
-                {pathname === "/dashboard/text-to-pdf" && "Text to PDF"}
+
                 {pathname === "/dashboard" && "Dashboard"}
                 {pathname.startsWith("/dashboard/comic/") && "Comic Workspace"}
               </h1>
