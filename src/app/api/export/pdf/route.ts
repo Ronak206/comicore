@@ -547,20 +547,20 @@ async function generatePdfBytes(
       }
 
       // Panel box with border
-      const panelBoxStartY = yPos + 15;
+      const panelBoxStartY = yPos + 25;
       
       // Calculate panel box height based on content
-      let estimatedHeight = 80; // Base height
+      let estimatedHeight = 100; // Base height - increased for more padding
       if (panel.dialogue && panel.dialogue.length > 0) {
-        estimatedHeight += panel.dialogue.length * 25;
+        estimatedHeight += panel.dialogue.length * 30;
       }
       if (panel.cameraAngle || panel.mood) {
-        estimatedHeight += 20;
+        estimatedHeight += 25;
       }
 
       // Draw panel background
       const panelBg = panelIndex % 2 === 0 ? colors.lightBlue : colors.white;
-      drawRoundedBox(contentPage, margin - 5, yPos - estimatedHeight + 15, contentWidth + 10, estimatedHeight, 0, panelBg, colors.primary, 1);
+      drawRoundedBox(contentPage, margin - 5, yPos - estimatedHeight + 25, contentWidth + 10, estimatedHeight, 0, panelBg, colors.primary, 1);
 
       // Panel number with colored background
       const panelTitle = `Panel ${panel.panelNumber || panelIndex + 1}`;
@@ -574,7 +574,7 @@ async function generatePdfBytes(
         font: fontBold,
         color: colors.white,
       });
-      yPos -= 25;
+      yPos -= 30; // More space after panel title
 
       // Panel description with bullet
       const descLines = wrapText(panel.description, contentWidth - 30, font, 10);
@@ -596,9 +596,9 @@ async function generatePdfBytes(
           font: font,
           color: colors.darkText,
         });
-        yPos -= 16;
+        yPos -= 18; // More space between description lines
       });
-      yPos -= 5;
+      yPos -= 10; // More gap after description section
 
       // Camera and mood as tags
       if (panel.cameraAngle || panel.mood) {
@@ -630,12 +630,12 @@ async function generatePdfBytes(
             color: colors.primary,
           });
         }
-        yPos -= 22;
+        yPos -= 25; // More space after camera/mood tags
       }
 
       // Dialogue
       if (panel.dialogue && panel.dialogue.length > 0) {
-        yPos -= 5;
+        yPos -= 10; // More gap before dialogue section
         
         for (const d of panel.dialogue) {
           if (yPos < 100) {
@@ -694,11 +694,11 @@ async function generatePdfBytes(
               color: colors.darkText,
             });
           });
-          yPos -= dialogueLines.length * 14 + 15;
+          yPos -= dialogueLines.length * 16 + 18; // More space after each dialogue
         }
       }
 
-      yPos -= 15;
+      yPos -= 30; // Significantly more gap between panels
     }
 
     // Footer
