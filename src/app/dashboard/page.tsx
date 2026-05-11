@@ -252,37 +252,26 @@ export default function DashboardPage() {
         }),
       });
 
-      const contentType = res.headers.get("content-type") || "";
-
-      // Handle JSON response (Cloudinary URL)
-      if (contentType.includes("application/json")) {
-        const data = await res.json();
-        if (!data.success) {
+      // Check for errors
+      if (!res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
           throw new Error(data.error || "Export failed");
         }
-        
-        // Open Cloudinary URL in new tab or download
-        if (data.data?.url) {
-          const a = document.createElement("a");
-          a.href = data.data.url;
-          a.download = filename;
-          a.target = "_blank";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
-      } else {
-        // Fallback: handle blob response
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        throw new Error("Export failed");
       }
+
+      // Get the PDF blob and download
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
       closePreview();
     } catch (err: any) {

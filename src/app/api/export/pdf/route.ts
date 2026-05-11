@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { v2 as cloudinary } from "cloudinary";
-
-// Configure Cloudinary from URL
-const CLOUDINARY_URL = process.env.CLOUDINARY_URL || "";
-if (CLOUDINARY_URL) {
-  cloudinary.config({
-    secure: true,
-  });
-}
 
 /**
  * Sanitize text for WinAnsi encoding (pdf-lib standard fonts)
@@ -37,7 +28,7 @@ function sanitizeForPdf(text: string): string {
 /**
  * POST /api/export/pdf
  *
- * Exports a comic project as PDF and uploads to Cloudinary
+ * Exports a comic project as PDF
  */
 export async function POST(request: NextRequest) {
   try {
@@ -128,14 +119,6 @@ export async function POST(request: NextRequest) {
       }
       if (currentLine) lines.push(currentLine);
       return lines;
-    };
-
-    // Helper to draw text safely
-    const drawTextSafe = (page: any, text: string, options: any) => {
-      const sanitized = sanitizeForPdf(text);
-      if (sanitized) {
-        page.drawText(sanitized, { ...options, font: options.font || font });
-      }
     };
 
     const includeCover = body.options?.includeCover !== false;
@@ -458,41 +441,16 @@ export async function POST(request: NextRequest) {
     // Generate PDF bytes
     const pdfBytes = await pdfDoc.save();
 
-    // Upload to Cloudinary
-    const fileName = `${title.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}`;
-    const base64Pdf = `data:application/pdf;base64,${Buffer.from(pdfBytes).toString("base64")}`;
-
-    let cloudinaryUrl: string;
-
-    try {
-      const uploadResult = await cloudinary.uploader.upload(base64Pdf, {
-        public_id: `comicore/pdfs/${fileName}`,
-        resource_type: "raw",
-        type: "upload",
-        access_mode: "public",
-      });
-      cloudinaryUrl = uploadResult.secure_url;
-    } catch (cloudError: any) {
-      console.error("Cloudinary upload failed:", cloudError);
-      // Fallback: return PDF directly if Cloudinary fails
-      return new NextResponse(pdfBytes, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${title}.pdf"`,
-          "Content-Length": pdfBytes.length.toString(),
-        },
-      });
-    }
-
-    // Return the Cloudinary URL
-    return NextResponse.json({
-      success: true,
-      data: {
-        url: cloudinaryUrl,
-        fileName: `${title}.pdf`,
-        size: pdfBytes.length,
-        pages: approvedPages.length,
+    // Return the PDF file directly for download
+    const safeFilename = title.replace(/[^a-zA-Z0-9]/g, "-") || "comic";
+    
+    return new NextResponse(pdfBytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${safeFilename}.pdf"`,
+        "Content-Length": pdfBytes.length.toString(),
+        "Cache-Control": "no-cache",
       },
     });
   } catch (error: any) {

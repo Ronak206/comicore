@@ -72,7 +72,6 @@ interface ExportRecord {
   size: string;
   date: string;
   status: string;
-  url?: string;
 }
 
 const exportFormats = [
@@ -224,71 +223,43 @@ export default function ExportPage() {
         }),
       });
 
-      const contentType = res.headers.get("content-type") || "";
-
-      // Handle JSON response (Cloudinary URL)
-      if (contentType.includes("application/json")) {
-        const data = await res.json();
-        if (!data.success) {
+      // Check for errors
+      if (!res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await res.json();
           setError(data.error || "Export failed");
           return;
         }
-
-        // Open Cloudinary URL
-        if (data.data?.url) {
-          const a = document.createElement("a");
-          a.href = data.data.url;
-          a.download = filename;
-          a.target = "_blank";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-
-          // Add to export history with URL
-          const newExport: ExportRecord = {
-            id: `export_${Date.now()}`,
-            projectId: selectedProject.id,
-            comicTitle: selectedProject.title,
-            format: selectedFormat.toUpperCase(),
-            pages: selectedProject.pages?.filter((p) => p.status === "approved").length || 0,
-            size: `${(data.data.size / 1024).toFixed(1)} KB`,
-            date: "Just now",
-            status: "completed",
-            url: data.data.url,
-          };
-          setExportHistory((prev) => [newExport, ...prev]);
-        }
-      } else {
-        // Fallback: handle blob response
-        if (!res.ok) {
-          setError("Export failed. Please try again.");
-          return;
-        }
-
-        const blob = await res.blob();
-        const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-
-        const newExport: ExportRecord = {
-          id: `export_${Date.now()}`,
-          projectId: selectedProject.id,
-          comicTitle: selectedProject.title,
-          format: selectedFormat.toUpperCase(),
-          pages: selectedProject.pages?.filter((p) => p.status === "approved").length || 0,
-          size: `${sizeMB} MB`,
-          date: "Just now",
-          status: "completed",
-        };
-        setExportHistory((prev) => [newExport, ...prev]);
+        setError("Export failed. Please try again.");
+        return;
       }
+
+      // Get the blob and download
+      const blob = await res.blob();
+      const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      // Add to export history
+      const newExport: ExportRecord = {
+        id: `export_${Date.now()}`,
+        projectId: selectedProject.id,
+        comicTitle: selectedProject.title,
+        format: selectedFormat.toUpperCase(),
+        pages: selectedProject.pages?.filter((p) => p.status === "approved").length || 0,
+        size: `${sizeMB} MB`,
+        date: "Just now",
+        status: "completed",
+      };
+      setExportHistory((prev) => [newExport, ...prev]);
 
       setStep("download");
     } catch (err: any) {
@@ -797,21 +768,9 @@ export default function ExportPage() {
                       {item.pages} pages • {item.size}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-[#E8B931] tracking-widest uppercase border border-[#E8B931]/30 px-2 py-0.5">
-                      {item.format}
-                    </span>
-                    {item.url && (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-[#666] hover:text-[#E8B931]"
-                      >
-                        View
-                      </a>
-                    )}
-                  </div>
+                  <span className="text-[10px] text-[#E8B931] tracking-widest uppercase border border-[#E8B931]/30 px-2 py-0.5">
+                    {item.format}
+                  </span>
                 </div>
               ))}
             </div>
