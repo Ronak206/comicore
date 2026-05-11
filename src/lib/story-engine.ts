@@ -84,6 +84,7 @@ export async function createNewProject(data: {
   tone: string;
   targetAudience: string;
   pageGoal: number;
+  userId?: string;
 }): Promise<ProjectData> {
   return createProject(data);
 }

@@ -42,6 +42,7 @@ async function db(): Promise<void> {
 
 export type ProjectData = {
   id: string;
+  userId?: string;
   title: string;
   genre: string;
   synopsis: string;
@@ -100,6 +101,7 @@ async function toProjectData(bookDoc: IBook): Promise<ProjectData> {
 
   return {
     id: bookDoc._id.toString(),
+    userId: bookDoc.userId?.toString(),
     title: bookDoc.title,
     genre: bookDoc.genre,
     synopsis: bookDoc.synopsis,
@@ -138,6 +140,7 @@ export async function createProject(data: {
   tone: string;
   targetAudience: string;
   pageGoal: number;
+  userId?: string;
 }): Promise<ProjectData> {
   await db();
 
@@ -148,24 +151,35 @@ export async function createProject(data: {
     tone: data.tone.trim(),
     targetAudience: data.targetAudience,
     pageGoal: data.pageGoal,
+    userId: data.userId,
   });
 
   return toProjectData(book);
 }
 
-export async function getProject(id: string): Promise<ProjectData | null> {
+export async function getProject(id: string, userId?: string): Promise<ProjectData | null> {
   await db();
 
-  const book = await Book.findById(id);
+  const query: any = { _id: id };
+  if (userId) {
+    query.userId = userId;
+  }
+
+  const book = await Book.findOne(query);
   if (!book) return null;
 
   return toProjectData(book);
 }
 
-export async function getAllProjects(): Promise<ProjectIndex[]> {
+export async function getAllProjects(userId?: string): Promise<ProjectIndex[]> {
   await db();
 
-  const books = await Book.find().sort({ updatedAt: -1 });
+  const query: any = {};
+  if (userId) {
+    query.userId = userId;
+  }
+
+  const books = await Book.find(query).sort({ updatedAt: -1 });
 
   const indices: ProjectIndex[] = [];
   for (const book of books) {
@@ -204,9 +218,15 @@ export async function updateProject(
     chapters: IChapter[];
     storyBeats: IStoryBeat[];
     pageIndex: IPageIndexItem[];
-  }>
+  }>,
+  userId?: string
 ): Promise<ProjectData | null> {
   await db();
+
+  const query: any = { _id: id };
+  if (userId) {
+    query.userId = userId;
+  }
 
   const updateFields: any = { ...updates };
   // Flatten style into dot notation
@@ -217,21 +237,29 @@ export async function updateProject(
     delete updateFields.style;
   }
 
-  const book = await Book.findByIdAndUpdate(id, updateFields, { returnDocument: 'after' });
+  const book = await Book.findOneAndUpdate(query, updateFields, { returnDocument: 'after' });
   if (!book) return null;
 
   return toProjectData(book);
 }
 
-export async function deleteProject(id: string): Promise<boolean> {
+export async function deleteProject(id: string, userId?: string): Promise<boolean> {
   await db();
+
+  const query: any = { _id: id };
+  if (userId) {
+    query.userId = userId;
+  }
+
+  const book = await Book.findOne(query);
+  if (!book) return false;
 
   await Character.deleteMany({ bookId: id });
   await World.deleteMany({ bookId: id });
   await Page.deleteMany({ bookId: id });
-  const result = await Book.findByIdAndDelete(id);
+  await Book.findByIdAndDelete(id);
 
-  return !!result;
+  return true;
 }
 
 // ─── Character CRUD ─────────────────────────────
@@ -304,7 +332,7 @@ export async function addPage(
     status: "in-review",
     number: { $ne: page.number } // Keep the current page number if exists
   });
-  
+
   if (orphanedPages.length > 0) {
     console.log(`[DB] Cleaning up ${orphanedPages.length} orphaned in-review pages`);
     await Page.deleteMany({
