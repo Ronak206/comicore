@@ -428,63 +428,124 @@ async function generatePdfBytes(
     drawSeparator(tocPage, margin, 60, contentWidth, colors.primary);
   }
 
-  // === CONTENT PAGES (Simple & Clean) ===
+  // === CONTENT PAGES (Clean & Structured) ===
   for (let pageIndex = 0; pageIndex < approvedPages.length; pageIndex++) {
     const page = approvedPages[pageIndex];
     const contentPage = addPage();
 
     let yPos = pageHeight - 60;
 
-    // Simple header with title and page number
-    const headerText = sanitizeForPdf(title);
-    contentPage.drawText(headerText, {
+    // Simple header bar
+    contentPage.drawLine({
+      start: { x: margin, y: pageHeight - 50 },
+      end: { x: pageWidth - margin, y: pageHeight - 50 },
+      thickness: 1,
+      color: rgb(0.7, 0.7, 0.7),
+    });
+
+    // Title on left
+    contentPage.drawText(sanitizeForPdf(title), {
       x: margin,
       y: pageHeight - 40,
-      size: 10,
+      size: 9,
       font: fontBold,
-      color: rgb(0.3, 0.3, 0.3),
+      color: rgb(0.4, 0.4, 0.4),
     });
 
     // Page number on right
-    const pageNumText = `Page ${pageIndex + 1}`;
-    const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
-    contentPage.drawText(pageNumText, {
-      x: pageWidth - margin - pageNumWidth,
+    contentPage.drawText(`Page ${pageIndex + 1}`, {
+      x: pageWidth - margin - 50,
       y: pageHeight - 40,
-      size: 10,
+      size: 9,
       font: font,
       color: rgb(0.5, 0.5, 0.5),
     });
 
-    // Separator line under header
-    contentPage.drawLine({
-      start: { x: margin, y: pageHeight - 55 },
-      end: { x: pageWidth - margin, y: pageHeight - 55 },
-      thickness: 0.5,
-      color: rgb(0.8, 0.8, 0.8),
-    });
-
-    // Page title (bold)
+    // === CHAPTER NAME (Prominent) ===
     const pageTitle = sanitizeForPdf(page.title);
-    contentPage.drawText(pageTitle, {
+    
+    // Chapter box with background
+    const chapterBoxHeight = 35;
+    contentPage.drawRectangle({
       x: margin,
-      y: yPos,
+      y: yPos - chapterBoxHeight + 10,
+      width: contentWidth,
+      height: chapterBoxHeight,
+      color: rgb(0.15, 0.35, 0.65),
+    });
+    
+    // Chapter name text (white, centered in box)
+    const chapterTitleWidth = fontBold.widthOfTextAtSize(pageTitle, 16);
+    contentPage.drawText(pageTitle, {
+      x: margin + (contentWidth - chapterTitleWidth) / 2,
+      y: yPos - 15,
       size: 16,
       font: fontBold,
-      color: rgb(0.1, 0.1, 0.1),
+      color: rgb(1, 1, 1),
     });
+    
+    yPos -= chapterBoxHeight + 25;
+
+    // === SCRIPT SECTION (if available) ===
+    if (page.script) {
+      // Script label
+      contentPage.drawText("Script:", {
+        x: margin,
+        y: yPos,
+        size: 10,
+        font: fontBold,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+      yPos -= 15;
+      
+      // Script content (italic)
+      const scriptLines = wrapText(page.script, contentWidth, fontOblique, 10);
+      scriptLines.slice(0, 5).forEach((line) => {
+        contentPage.drawText(line, {
+          x: margin + 10,
+          y: yPos,
+          size: 10,
+          font: fontOblique,
+          color: rgb(0.35, 0.35, 0.35),
+        });
+        yPos -= 14;
+      });
+      
+      yPos -= 15;
+      
+      // Separator after script
+      contentPage.drawLine({
+        start: { x: margin + 50, y: yPos + 5 },
+        end: { x: pageWidth - margin - 50, y: yPos + 5 },
+        thickness: 0.5,
+        color: rgb(0.8, 0.8, 0.8),
+      });
+      
+      yPos -= 20;
+    }
+
+    // === PANELS SECTION ===
+    // Panels header
+    contentPage.drawText("PANELS", {
+      x: margin,
+      y: yPos,
+      size: 11,
+      font: fontBold,
+      color: rgb(0.2, 0.2, 0.6),
+    });
+    
+    // Underline for panels header
+    const panelsHeaderWidth = fontBold.widthOfTextAtSize("PANELS", 11);
+    contentPage.drawLine({
+      start: { x: margin, y: yPos - 3 },
+      end: { x: margin + panelsHeaderWidth, y: yPos - 3 },
+      thickness: 1.5,
+      color: rgb(0.2, 0.2, 0.6),
+    });
+    
     yPos -= 25;
 
-    // Underline under page title
-    contentPage.drawLine({
-      start: { x: margin, y: yPos + 8 },
-      end: { x: margin + fontBold.widthOfTextAtSize(pageTitle, 16), y: yPos + 8 },
-      thickness: 1,
-      color: rgb(0.7, 0.7, 0.7),
-    });
-    yPos -= 20;
-
-    // Panel content - Simple layout
+    // Panel content
     for (let panelIndex = 0; panelIndex < page.panels.length; panelIndex++) {
       const panel = page.panels[panelIndex];
 
@@ -494,51 +555,62 @@ async function generatePdfBytes(
         yPos = pageHeight - 60;
       }
 
-      // Panel title (bold) - Panel 1, Panel 2, etc.
-      const panelTitle = `Panel ${panel.panelNumber || panelIndex + 1}`;
-      contentPage.drawText(panelTitle, {
+      // Panel header box
+      const panelHeader = `Panel ${panel.panelNumber || panelIndex + 1}`;
+      const panelHeaderWidth = fontBold.widthOfTextAtSize(panelHeader, 11) + 16;
+      
+      contentPage.drawRectangle({
         x: margin,
-        y: yPos,
-        size: 12,
-        font: fontBold,
-        color: rgb(0.2, 0.2, 0.6),
+        y: yPos - 5,
+        width: panelHeaderWidth,
+        height: 18,
+        color: rgb(0.3, 0.3, 0.6),
       });
-      yPos -= 18;
+      
+      contentPage.drawText(panelHeader, {
+        x: margin + 8,
+        y: yPos,
+        size: 11,
+        font: fontBold,
+        color: rgb(1, 1, 1),
+      });
+      
+      yPos -= 20;
 
       // Panel description
       if (panel.description) {
-        const descLines = wrapText(panel.description, contentWidth, font, 10);
+        const descLines = wrapText(panel.description, contentWidth - 10, font, 9);
         descLines.forEach((line) => {
           contentPage.drawText(line, {
-            x: margin + 10,
+            x: margin + 5,
             y: yPos,
-            size: 10,
+            size: 9,
             font: font,
-            color: rgb(0.2, 0.2, 0.2),
+            color: rgb(0.25, 0.25, 0.25),
           });
-          yPos -= 14;
+          yPos -= 12;
         });
       }
 
-      // Camera and mood (simple text)
+      // Camera and mood
       if (panel.cameraAngle || panel.mood) {
         const meta = [];
         if (panel.cameraAngle) meta.push(`Camera: ${panel.cameraAngle}`);
         if (panel.mood) meta.push(`Mood: ${panel.mood}`);
-        const metaText = sanitizeForPdf(meta.join("  |  "));
+        const metaText = sanitizeForPdf(meta.join("   |   "));
         contentPage.drawText(metaText, {
-          x: margin + 10,
+          x: margin + 5,
           y: yPos,
-          size: 9,
+          size: 8,
           font: fontOblique,
-          color: rgb(0.4, 0.4, 0.4),
+          color: rgb(0.45, 0.45, 0.45),
         });
-        yPos -= 16;
+        yPos -= 14;
       }
 
       // Dialogue
       if (panel.dialogue && panel.dialogue.length > 0) {
-        yPos -= 5;
+        yPos -= 3;
         
         for (const d of panel.dialogue) {
           if (yPos < 80) {
@@ -554,51 +626,60 @@ async function generatePdfBytes(
           // Character name
           const prefix = isNarration ? `[${charName}]` : `${charName}:`;
           contentPage.drawText(prefix, {
-            x: margin + 10,
+            x: margin + 5,
             y: yPos,
             size: 9,
             font: fontBold,
             color: rgb(0.2, 0.2, 0.5),
           });
-          yPos -= 14;
+          yPos -= 12;
 
           // Dialogue text
-          const dialogueLines = wrapText(dialogueText, contentWidth - 20, font, 9);
+          const dialogueLines = wrapText(dialogueText, contentWidth - 15, font, 9);
           dialogueLines.forEach((line) => {
             const displayText = isSfx ? `*${line}*` : line;
             contentPage.drawText(displayText, {
-              x: margin + 20,
+              x: margin + 15,
               y: yPos,
               size: 9,
               font: isNarration || isSfx ? fontOblique : font,
               color: rgb(0.3, 0.3, 0.3),
             });
-            yPos -= 12;
+            yPos -= 11;
           });
-          yPos -= 6;
+          yPos -= 5;
         }
       }
 
-      // Add significant spacing between panels
-      yPos -= 20;
+      // Spacing and separator between panels
+      yPos -= 12;
       
-      // Separator line between panels
-      contentPage.drawLine({
-        start: { x: margin + 30, y: yPos + 8 },
-        end: { x: pageWidth - margin - 30, y: yPos + 8 },
-        thickness: 0.3,
-        color: rgb(0.85, 0.85, 0.85),
-      });
+      // Dashed separator line between panels
+      const dashLength = 3;
+      const dashGap = 3;
+      const separatorY = yPos + 5;
+      const separatorStartX = margin + 40;
+      const separatorEndX = pageWidth - margin - 40;
+      
+      for (let x = separatorStartX; x < separatorEndX; x += dashLength + dashGap) {
+        const endX = Math.min(x + dashLength, separatorEndX);
+        contentPage.drawLine({
+          start: { x, y: separatorY },
+          end: { x: endX, y: separatorY },
+          thickness: 0.5,
+          color: rgb(0.75, 0.75, 0.75),
+        });
+      }
       
       yPos -= 15;
     }
 
-    // Simple footer
+    // Footer
     const footerText = sanitizeForPdf(`Comicore AI  |  ${title}`);
     const footerWidth = font.widthOfTextAtSize(footerText, 8);
     contentPage.drawText(footerText, {
       x: (pageWidth - footerWidth) / 2,
-      y: 25,
+      y: 20,
       size: 8,
       font: font,
       color: rgb(0.6, 0.6, 0.6),
