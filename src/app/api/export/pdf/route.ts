@@ -1,708 +1,655 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { connectDB } from "@/lib/mongodb";
 import Export from "@/lib/models/Export";
 import { getSession } from "@/lib/auth";
+import puppeteer from "puppeteer";
 
 /**
- * Sanitize text for WinAnsi encoding (pdf-lib standard fonts)
- * Removes characters that can't be encoded
+ * Escape HTML special characters
  */
-function sanitizeForPdf(text: string): string {
+function escapeHtml(text: string): string {
   if (!text) return "";
-
   return text
-    // Replace newlines with spaces
-    .replace(/[\r\n]+/g, " ")
-    // Replace various dashes with simple dash
-    .replace(/[—–−]/g, "-")
-    // Replace smart quotes with simple quotes
-    .replace(/[""'']/g, '"')
-    // Replace ellipsis
-    .replace(/…/g, "...")
-    // Remove other non-ASCII characters
-    .replace(/[^\x00-\x7F]/g, "")
-    // Replace multiple spaces with single space
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Color palette for beautiful PDF
-const colors = {
-  // Primary colors
-  primary: rgb(0.2, 0.4, 0.8),       // Blue
-  secondary: rgb(0.6, 0.3, 0.7),     // Purple
-  
-  // Background colors
-  lightBlue: rgb(0.92, 0.95, 1.0),   // Light blue background
-  lightPurple: rgb(0.95, 0.92, 0.98), // Light purple background
-  lightGray: rgb(0.96, 0.96, 0.96),  // Light gray background
-  
-  // Text colors
-  darkText: rgb(0.15, 0.15, 0.15),   // Dark text
-  mediumText: rgb(0.3, 0.3, 0.3),    // Medium text
-  lightText: rgb(0.5, 0.5, 0.5),     // Light text
-  
-  // Accent colors
-  accent: rgb(0.98, 0.75, 0.2),      // Gold accent
-  border: rgb(0.8, 0.8, 0.8),        // Border gray
-  white: rgb(1, 1, 1),               // White
-};
-
-/**
- * Draw a rounded rectangle box
- */
-function drawRoundedBox(
-  page: any,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number,
-  fillColor: any,
-  borderColor: any,
-  borderWidth: number = 1
-) {
-  // Draw filled rectangle with rounded corners approximation
-  page.drawRectangle({
-    x,
-    y,
-    width,
-    height,
-    color: fillColor,
-    borderColor: borderColor,
-    borderWidth: borderWidth,
-  });
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /**
- * Draw an underline under text
+ * Generate HTML content for the comic PDF using AI-inspired beautiful styling
  */
-function drawUnderline(
-  page: any,
-  text: string,
-  x: number,
-  y: number,
-  font: any,
-  fontSize: number,
-  color: any,
-  offset: number = 2
-) {
-  const textWidth = font.widthOfTextAtSize(text, fontSize);
-  page.drawLine({
-    start: { x, y: y - offset },
-    end: { x: x + textWidth, y: y - offset },
-    thickness: 1,
-    color: color,
-  });
-}
-
-/**
- * Draw a decorative line separator
- */
-function drawSeparator(
-  page: any,
-  x: number,
-  y: number,
-  width: number,
-  color: any = colors.border
-) {
-  page.drawLine({
-    start: { x, y },
-    end: { x: x + width, y },
-    thickness: 0.5,
-    color: color,
-  });
-}
-
-/**
- * Generate PDF bytes from project data with beautiful styling
- */
-async function generatePdfBytes(
-  project: any,
-  options: {
-    title?: string;
-    font?: string;
-    fontSize?: number;
-    includeCover?: boolean;
-    includeToc?: boolean;
-    includePageNumbers?: boolean;
-    metadata?: { author?: string };
-  }
-): Promise<Uint8Array> {
+function generateComicHtml(project: any, options: {
+  title?: string;
+  author?: string;
+  includeCover?: boolean;
+  includeToc?: boolean;
+}): string {
+  const title = escapeHtml(options.title || project.title);
+  const author = escapeHtml(options.author || "Comicore AI");
   const approvedPages = project.pages.filter((p: any) => p.status === "approved");
+  const totalPanels = approvedPages.reduce((acc: number, p: any) => acc + (p.panels?.length || 0), 0);
+  const genre = escapeHtml(project.genre || "Comic");
+  const synopsis = escapeHtml(project.synopsis || "");
+  const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  const title = sanitizeForPdf(options.title || project.title);
-  const author = sanitizeForPdf(options.metadata?.author || "Comicore AI");
-  const fontId = options.font || "helvetica";
-
-  // Create PDF document
-  const pdfDoc = await PDFDocument.create();
-
-  // Embed fonts based on selection
-  let font: any;
-  let fontBold: any;
-  let fontOblique: any;
-
-  switch (fontId) {
-    case "times":
-      font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-      fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-      fontOblique = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
-      break;
-    case "courier":
-      font = await pdfDoc.embedFont(StandardFonts.Courier);
-      fontBold = await pdfDoc.embedFont(StandardFonts.CourierBold);
-      fontOblique = await pdfDoc.embedFont(StandardFonts.CourierOblique);
-      break;
-    default:
-      font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      fontOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
-  }
-
-  // Page dimensions (A4)
-  const pageWidth = 595.28;
-  const pageHeight = 841.89;
-  const margin = 50;
-  const contentWidth = pageWidth - margin * 2;
-
-  // Helper to add a new page
-  const addPage = () => pdfDoc.addPage([pageWidth, pageHeight]);
-
-  // Helper to wrap text
-  const wrapText = (text: string, maxWidth: number, font: any, fontSize: number): string[] => {
-    const sanitized = sanitizeForPdf(text);
-    const words = sanitized.split(" ");
-    const lines: string[] = [];
-    let currentLine = "";
-
-    for (const word of words) {
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      const width = font.widthOfTextAtSize(testLine, fontSize);
-
-      if (width <= maxWidth) {
-        currentLine = testLine;
-      } else {
-        if (currentLine) lines.push(currentLine);
-        currentLine = word;
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    /* Reset and Base */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    @page {
+      size: A4;
+      margin: 0;
+    }
+    
+    body {
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #1a1a2e;
+      background: #ffffff;
+    }
+    
+    /* Page Container */
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 20mm;
+      page-break-after: always;
+      position: relative;
+    }
+    
+    .page:last-child {
+      page-break-after: auto;
+    }
+    
+    /* ==================== COVER PAGE ==================== */
+    .cover-page {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .cover-page::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 8px;
+      background: linear-gradient(90deg, #e94560, #f39c12, #e94560);
+    }
+    
+    .cover-page::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 8px;
+      background: linear-gradient(90deg, #e94560, #f39c12, #e94560);
+    }
+    
+    .cover-decoration {
+      position: absolute;
+      width: 300px;
+      height: 300px;
+      border: 2px solid rgba(233, 69, 96, 0.2);
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    
+    .cover-decoration::before {
+      content: '';
+      position: absolute;
+      width: 250px;
+      height: 250px;
+      border: 1px solid rgba(243, 156, 18, 0.3);
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    
+    .cover-content {
+      position: relative;
+      z-index: 10;
+    }
+    
+    .cover-title {
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-bottom: 15px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      background: linear-gradient(135deg, #ffffff, #e0e0e0);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .cover-genre {
+      font-size: 16px;
+      font-style: italic;
+      color: #e94560;
+      margin-bottom: 30px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    
+    .cover-author {
+      font-size: 14px;
+      color: rgba(255,255,255,0.8);
+      margin-bottom: 40px;
+    }
+    
+    .cover-stats {
+      display: flex;
+      gap: 30px;
+      justify-content: center;
+      margin-bottom: 40px;
+    }
+    
+    .stat-box {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 10px;
+      padding: 15px 25px;
+      text-align: center;
+      backdrop-filter: blur(5px);
+    }
+    
+    .stat-number {
+      font-size: 28px;
+      font-weight: 700;
+      color: #f39c12;
+    }
+    
+    .stat-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: rgba(255,255,255,0.6);
+    }
+    
+    .cover-synopsis {
+      max-width: 80%;
+      font-size: 12px;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.8;
+      font-style: italic;
+      border-left: 3px solid #e94560;
+      padding-left: 20px;
+      text-align: left;
+    }
+    
+    .cover-footer {
+      position: absolute;
+      bottom: 30px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.5);
+      letter-spacing: 1px;
+    }
+    
+    /* ==================== TABLE OF CONTENTS ==================== */
+    .toc-page {
+      background: #fafafa;
+    }
+    
+    .toc-header {
+      background: linear-gradient(135deg, #1a1a2e, #0f3460);
+      color: #ffffff;
+      padding: 20px 30px;
+      margin: -20mm -20mm 30px -20mm;
+      text-align: center;
+    }
+    
+    .toc-title {
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    
+    .toc-list {
+      list-style: none;
+    }
+    
+    .toc-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 15px;
+      margin-bottom: 8px;
+      background: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      transition: all 0.3s ease;
+    }
+    
+    .toc-item:nth-child(odd) {
+      background: #f0f4f8;
+    }
+    
+    .toc-page-title {
+      font-size: 13px;
+      color: #1a1a2e;
+      font-weight: 500;
+    }
+    
+    .toc-page-number {
+      background: linear-gradient(135deg, #e94560, #c23a51);
+      color: #ffffff;
+      padding: 4px 12px;
+      border-radius: 15px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    
+    /* ==================== CONTENT PAGES ==================== */
+    .content-page {
+      background: #ffffff;
+    }
+    
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e0e0e0;
+      margin-bottom: 25px;
+    }
+    
+    .header-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .header-page-num {
+      font-size: 12px;
+      color: #999;
+    }
+    
+    /* Chapter Title */
+    .chapter-title {
+      background: linear-gradient(135deg, #1a1a2e, #0f3460);
+      color: #ffffff;
+      padding: 15px 25px;
+      border-radius: 8px;
+      text-align: center;
+      margin-bottom: 25px;
+      box-shadow: 0 4px 15px rgba(26, 26, 46, 0.3);
+    }
+    
+    .chapter-title h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    
+    /* Script Section */
+    .script-section {
+      background: #f8f9fa;
+      border-left: 4px solid #f39c12;
+      padding: 15px 20px;
+      margin-bottom: 25px;
+      border-radius: 0 8px 8px 0;
+    }
+    
+    .script-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #f39c12;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    
+    .script-content {
+      font-size: 12px;
+      color: #555;
+      font-style: italic;
+      line-height: 1.7;
+    }
+    
+    /* Panels Section */
+    .panels-header {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1a1a2e;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 20px;
+      padding-bottom: 8px;
+      border-bottom: 3px solid #e94560;
+      display: inline-block;
+    }
+    
+    /* Panel Item */
+    .panel-item {
+      margin-bottom: 25px;
+      padding: 20px;
+      background: #fafafa;
+      border-radius: 10px;
+      border: 1px solid #e8e8e8;
+      position: relative;
+    }
+    
+    .panel-item::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #e94560, #f39c12);
+      border-radius: 10px 0 0 10px;
+    }
+    
+    .panel-header {
+      display: inline-block;
+      background: linear-gradient(135deg, #1a1a2e, #0f3460);
+      color: #ffffff;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 15px;
+      letter-spacing: 1px;
+    }
+    
+    .panel-description {
+      font-size: 12px;
+      color: #333;
+      line-height: 1.7;
+      margin-bottom: 12px;
+      padding-left: 10px;
+    }
+    
+    .panel-meta {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 12px;
+      padding-left: 10px;
+    }
+    
+    .meta-tag {
+      font-size: 10px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    
+    .meta-camera {
+      background: #e8f4fd;
+      color: #1976d2;
+    }
+    
+    .meta-mood {
+      background: #fff3e0;
+      color: #f57c00;
+    }
+    
+    /* Dialogue */
+    .dialogue-section {
+      margin-top: 12px;
+      padding-left: 10px;
+    }
+    
+    .dialogue-item {
+      margin-bottom: 12px;
+      padding: 10px 15px;
+      background: #ffffff;
+      border-radius: 8px;
+      border: 1px solid #e8e8e8;
+    }
+    
+    .dialogue-character {
+      font-size: 11px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 5px;
+      display: inline-block;
+      padding: 2px 8px;
+      background: #e8f4fd;
+      border-radius: 4px;
+    }
+    
+    .dialogue-narrator {
+      font-style: italic;
+      background: #f5f5f5;
+      color: #666;
+    }
+    
+    .dialogue-text {
+      font-size: 11px;
+      color: #444;
+      line-height: 1.6;
+      padding-left: 10px;
+    }
+    
+    .dialogue-text.sfx {
+      font-style: italic;
+      color: #888;
+    }
+    
+    /* Panel Separator */
+    .panel-separator {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #ddd, transparent);
+      margin: 20px 0;
+    }
+    
+    /* Footer */
+    .page-footer {
+      position: absolute;
+      bottom: 15mm;
+      left: 20mm;
+      right: 20mm;
+      text-align: center;
+      font-size: 9px;
+      color: #999;
+      letter-spacing: 1px;
+    }
+    
+    /* No Print */
+    @media print {
+      body {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
       }
     }
-    if (currentLine) lines.push(currentLine);
-    return lines;
-  };
-
-  const includeCover = options.includeCover !== false;
-  const includeToc = options.includeToc !== false;
-  const includePageNumbers = options.includePageNumbers !== false;
-
-  // === COVER PAGE ===
-  if (includeCover) {
-    const coverPage = addPage();
-
-    // Top decorative bar
-    drawRoundedBox(coverPage, 0, pageHeight - 80, pageWidth, 80, 0, colors.primary, colors.primary);
-
-    // Title background box
-    const titleBoxY = pageHeight - 220;
-    const titleBoxHeight = 100;
-    drawRoundedBox(coverPage, margin - 10, titleBoxY - titleBoxHeight, contentWidth + 20, titleBoxHeight + 20, 0, colors.lightBlue, colors.primary, 2);
-
-    // Title
-    const titleSize = 32;
-    const titleWidth = fontBold.widthOfTextAtSize(title, titleSize);
-    const titleY = titleBoxY - 35;
-    coverPage.drawText(title, {
-      x: (pageWidth - titleWidth) / 2,
-      y: titleY,
-      size: titleSize,
-      font: fontBold,
-      color: colors.primary,
-    });
-    
-    // Underline for title
-    drawUnderline(coverPage, title, (pageWidth - titleWidth) / 2, titleY, fontBold, titleSize, colors.accent, 8);
-
-    // Genre with italic styling
-    const genreText = sanitizeForPdf(`${project.genre} Comic`);
-    const genreSize = 16;
-    const genreWidth = fontOblique.widthOfTextAtSize(genreText, genreSize);
-    coverPage.drawText(genreText, {
-      x: (pageWidth - genreWidth) / 2,
-      y: pageHeight - 280,
-      size: genreSize,
-      font: fontOblique,
-      color: colors.secondary,
-    });
-
-    // Author box
-    const authorBoxY = pageHeight - 340;
-    drawRoundedBox(coverPage, margin + 80, authorBoxY - 30, contentWidth - 160, 40, 0, colors.white, colors.border, 1);
-    
-    const authorText = sanitizeForPdf(`Written by ${author}`);
-    const authorWidth = font.widthOfTextAtSize(authorText, 12);
-    coverPage.drawText(authorText, {
-      x: (pageWidth - authorWidth) / 2,
-      y: authorBoxY - 10,
-      size: 12,
-      font: font,
-      color: colors.mediumText,
-    });
-
-    // Stats row with boxes
-    const statsY = pageHeight - 420;
-    const statBoxWidth = 120;
-    const statBoxHeight = 50;
-    const statGap = 30;
-    const totalStatsWidth = statBoxWidth * 3 + statGap * 2;
-    const statsStartX = (pageWidth - totalStatsWidth) / 2;
-
-    // Pages stat
-    drawRoundedBox(coverPage, statsStartX, statsY - statBoxHeight, statBoxWidth, statBoxHeight, 0, colors.lightPurple, colors.secondary, 1);
-    const pagesText = `${approvedPages.length}`;
-    const pagesWidth = fontBold.widthOfTextAtSize(pagesText, 20);
-    coverPage.drawText(pagesText, {
-      x: statsStartX + (statBoxWidth - pagesWidth) / 2,
-      y: statsY - 22,
-      size: 20,
-      font: fontBold,
-      color: colors.secondary,
-    });
-    const pagesLabel = "Pages";
-    const pagesLabelWidth = font.widthOfTextAtSize(pagesLabel, 9);
-    coverPage.drawText(pagesLabel, {
-      x: statsStartX + (statBoxWidth - pagesLabelWidth) / 2,
-      y: statsY - 40,
-      size: 9,
-      font: font,
-      color: colors.lightText,
-    });
-
-    // Panels stat
-    const totalPanels = approvedPages.reduce((acc: number, p: any) => acc + (p.panels?.length || 0), 0);
-    drawRoundedBox(coverPage, statsStartX + statBoxWidth + statGap, statsY - statBoxHeight, statBoxWidth, statBoxHeight, 0, colors.lightBlue, colors.primary, 1);
-    const panelsText = `${totalPanels}`;
-    const panelsWidth = fontBold.widthOfTextAtSize(panelsText, 20);
-    coverPage.drawText(panelsText, {
-      x: statsStartX + statBoxWidth + statGap + (statBoxWidth - panelsWidth) / 2,
-      y: statsY - 22,
-      size: 20,
-      font: fontBold,
-      color: colors.primary,
-    });
-    const panelsLabel = "Panels";
-    const panelsLabelWidth = font.widthOfTextAtSize(panelsLabel, 9);
-    coverPage.drawText(panelsLabel, {
-      x: statsStartX + statBoxWidth + statGap + (statBoxWidth - panelsLabelWidth) / 2,
-      y: statsY - 40,
-      size: 9,
-      font: font,
-      color: colors.lightText,
-    });
-
-    // Genre stat
-    drawRoundedBox(coverPage, statsStartX + (statBoxWidth + statGap) * 2, statsY - statBoxHeight, statBoxWidth, statBoxHeight, 0, colors.lightGray, colors.border, 1);
-    const genreLabel = "Genre";
-    const genreLabelWidth = font.widthOfTextAtSize(genreLabel, 9);
-    coverPage.drawText(genreLabel, {
-      x: statsStartX + (statBoxWidth + statGap) * 2 + (statBoxWidth - genreLabelWidth) / 2,
-      y: statsY - 40,
-      size: 9,
-      font: font,
-      color: colors.lightText,
-    });
-    const genreVal = sanitizeForPdf(project.genre || "Comic");
-    const genreValWidth = fontBold.widthOfTextAtSize(genreVal, 11);
-    coverPage.drawText(genreVal, {
-      x: statsStartX + (statBoxWidth + statGap) * 2 + (statBoxWidth - genreValWidth) / 2,
-      y: statsY - 22,
-      size: 11,
-      font: fontBold,
-      color: colors.darkText,
-    });
-
-    // Synopsis section with box
-    if (project.synopsis) {
-      const synopsisBoxY = pageHeight - 560;
-      const synopsisBoxHeight = 100;
-      drawRoundedBox(coverPage, margin - 10, synopsisBoxY - synopsisBoxHeight, contentWidth + 20, synopsisBoxHeight + 10, 0, colors.lightGray, colors.border, 1);
+  </style>
+</head>
+<body>
+  ${options.includeCover !== false ? `
+  <!-- COVER PAGE -->
+  <div class="page cover-page">
+    <div class="cover-decoration"></div>
+    <div class="cover-content">
+      <h1 class="cover-title">${title}</h1>
+      <p class="cover-genre">${genre}</p>
+      <p class="cover-author">Written by ${author}</p>
       
-      // Synopsis header
-      const synopsisHeader = "Synopsis";
-      coverPage.drawText(synopsisHeader, {
-        x: margin + 5,
-        y: synopsisBoxY - 15,
-        size: 11,
-        font: fontBold,
-        color: colors.primary,
-      });
-      drawUnderline(coverPage, synopsisHeader, margin + 5, synopsisBoxY - 15, fontBold, 11, colors.primary, 3);
+      <div class="cover-stats">
+        <div class="stat-box">
+          <div class="stat-number">${approvedPages.length}</div>
+          <div class="stat-label">Pages</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">${totalPanels}</div>
+          <div class="stat-label">Panels</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-number">${genre}</div>
+          <div class="stat-label">Genre</div>
+        </div>
+      </div>
+      
+      ${synopsis ? `
+      <div class="cover-synopsis">
+        ${synopsis.substring(0, 500)}${synopsis.length > 500 ? '...' : ''}
+      </div>
+      ` : ''}
+    </div>
+    <div class="cover-footer">Generated with Comicore AI | ${date}</div>
+  </div>
+  ` : ''}
+  
+  ${options.includeToc !== false ? `
+  <!-- TABLE OF CONTENTS -->
+  <div class="page toc-page">
+    <div class="toc-header">
+      <h2 class="toc-title">Table of Contents</h2>
+    </div>
+    <ul class="toc-list">
+      ${approvedPages.map((page: any, index: number) => `
+        <li class="toc-item">
+          <span class="toc-page-title">${index + 1}. ${escapeHtml(page.title)}</span>
+          <span class="toc-page-number">Page ${index + 1}</span>
+        </li>
+      `).join('')}
+    </ul>
+  </div>
+  ` : ''}
+  
+  <!-- CONTENT PAGES -->
+  ${approvedPages.map((page: any, pageIndex: number) => `
+  <div class="page content-page">
+    <div class="page-header">
+      <span class="header-title">${title}</span>
+      <span class="header-page-num">Page ${pageIndex + 1}</span>
+    </div>
+    
+    <div class="chapter-title">
+      <h1>${escapeHtml(page.title)}</h1>
+    </div>
+    
+    ${page.script ? `
+    <div class="script-section">
+      <div class="script-label">Script</div>
+      <div class="script-content">${escapeHtml(page.script)}</div>
+    </div>
+    ` : ''}
+    
+    <div class="panels-header">Panels</div>
+    
+    ${page.panels.map((panel: any, panelIndex: number) => `
+    <div class="panel-item">
+      <div class="panel-header">Panel ${panel.panelNumber || panelIndex + 1}</div>
+      
+      <div class="panel-description">
+        ${escapeHtml(panel.description || '')}
+      </div>
+      
+      ${panel.cameraAngle || panel.mood ? `
+      <div class="panel-meta">
+        ${panel.cameraAngle ? `<span class="meta-tag meta-camera">Camera: ${escapeHtml(panel.cameraAngle)}</span>` : ''}
+        ${panel.mood ? `<span class="meta-tag meta-mood">Mood: ${escapeHtml(panel.mood)}</span>` : ''}
+      </div>
+      ` : ''}
+      
+      ${panel.dialogue && panel.dialogue.length > 0 ? `
+      <div class="dialogue-section">
+        ${panel.dialogue.map((d: any) => `
+        <div class="dialogue-item">
+          <span class="dialogue-character ${d.type === 'narration' ? 'dialogue-narrator' : ''}">
+            ${d.type === 'narration' ? `[${escapeHtml(d.character)}]` : `${escapeHtml(d.character)}:`}
+          </span>
+          <div class="dialogue-text ${d.type === 'sfx' ? 'sfx' : ''}">
+            ${d.type === 'sfx' ? `*${escapeHtml(d.text)}*` : escapeHtml(d.text)}
+          </div>
+        </div>
+        `).join('')}
+      </div>
+      ` : ''}
+    </div>
+    ${panelIndex < page.panels.length - 1 ? '<div class="panel-separator"></div>' : ''}
+    `).join('')}
+    
+    <div class="page-footer">Comicore AI | ${title}</div>
+  </div>
+  `).join('')}
+</body>
+</html>
+  `;
+}
 
-      // Synopsis text
-      const synopsisLines = wrapText(project.synopsis, contentWidth - 20, fontOblique, 10);
-      let synopsisY = synopsisBoxY - 35;
-      synopsisLines.slice(0, 5).forEach((line) => {
-        coverPage.drawText(line, {
-          x: margin + 5,
-          y: synopsisY,
-          size: 10,
-          font: fontOblique,
-          color: colors.mediumText,
-        });
-        synopsisY -= 15;
-      });
+/**
+ * Generate PDF bytes from HTML using Puppeteer
+ */
+async function generatePdfFromHtml(html: string): Promise<Uint8Array> {
+  let browser = null;
+  
+  try {
+    // Launch Puppeteer
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--single-process',
+        '--no-zygote',
+      ],
+    });
+    
+    const page = await browser.newPage();
+    
+    // Set content
+    await page.setContent(html, {
+      waitUntil: 'networkidle0',
+    });
+    
+    // Generate PDF
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+      },
+    });
+    
+    return new Uint8Array(pdfBuffer);
+  } finally {
+    if (browser) {
+      await browser.close();
     }
-
-    // Bottom decorative bar
-    drawRoundedBox(coverPage, 0, 0, pageWidth, 40, 0, colors.primary, colors.primary);
-
-    // Generation info centered in bottom bar
-    const genText = sanitizeForPdf(`Generated with Comicore AI  |  ${new Date().toLocaleDateString()}`);
-    const genWidth = font.widthOfTextAtSize(genText, 9);
-    coverPage.drawText(genText, {
-      x: (pageWidth - genWidth) / 2,
-      y: 15,
-      size: 9,
-      font: font,
-      color: colors.white,
-    });
   }
-
-  // === TABLE OF CONTENTS ===
-  if (includeToc) {
-    const tocPage = addPage();
-
-    // TOC Header with background
-    drawRoundedBox(tocPage, margin - 10, pageHeight - 100, contentWidth + 20, 50, 0, colors.primary, colors.primary);
-    
-    const tocTitle = "Table of Contents";
-    const tocTitleWidth = fontBold.widthOfTextAtSize(tocTitle, 22);
-    tocPage.drawText(tocTitle, {
-      x: (pageWidth - tocTitleWidth) / 2,
-      y: pageHeight - 75,
-      size: 22,
-      font: fontBold,
-      color: colors.white,
-    });
-
-    // TOC entries with alternating backgrounds
-    let tocY = pageHeight - 140;
-    approvedPages.forEach((page: any, index: number) => {
-      if (tocY < 80) {
-        const newTocPage = addPage();
-        tocY = pageHeight - 80;
-      }
-
-      // Alternating row background
-      const rowBg = index % 2 === 0 ? colors.lightBlue : colors.white;
-      drawRoundedBox(tocPage, margin - 5, tocY - 5, contentWidth + 10, 25, 0, rowBg, rowBg);
-
-      const entryTitle = sanitizeForPdf(`${page.number}. ${page.title}`);
-      tocPage.drawText(entryTitle, {
-        x: margin + 5,
-        y: tocY + 5,
-        size: 11,
-        font: font,
-        color: colors.darkText,
-      });
-
-      // Page number in a small box
-      const pageNum = `${index + 1}`;
-      const pageNumWidth = fontBold.widthOfTextAtSize(pageNum, 10);
-      const pageNumBoxX = pageWidth - margin - 30;
-      
-      drawRoundedBox(tocPage, pageNumBoxX, tocY, 25, 18, 0, colors.secondary, colors.secondary);
-      tocPage.drawText(pageNum, {
-        x: pageNumBoxX + (25 - pageNumWidth) / 2,
-        y: tocY + 5,
-        size: 10,
-        font: fontBold,
-        color: colors.white,
-      });
-
-      tocY -= 30;
-    });
-
-    // Bottom decorative line
-    drawSeparator(tocPage, margin, 60, contentWidth, colors.primary);
-  }
-
-  // === CONTENT PAGES (Clean & Structured) ===
-  for (let pageIndex = 0; pageIndex < approvedPages.length; pageIndex++) {
-    const page = approvedPages[pageIndex];
-    const contentPage = addPage();
-
-    let yPos = pageHeight - 60;
-
-    // Simple header bar
-    contentPage.drawLine({
-      start: { x: margin, y: pageHeight - 50 },
-      end: { x: pageWidth - margin, y: pageHeight - 50 },
-      thickness: 1,
-      color: rgb(0.7, 0.7, 0.7),
-    });
-
-    // Title on left
-    contentPage.drawText(sanitizeForPdf(title), {
-      x: margin,
-      y: pageHeight - 40,
-      size: 9,
-      font: fontBold,
-      color: rgb(0.4, 0.4, 0.4),
-    });
-
-    // Page number on right
-    contentPage.drawText(`Page ${pageIndex + 1}`, {
-      x: pageWidth - margin - 50,
-      y: pageHeight - 40,
-      size: 9,
-      font: font,
-      color: rgb(0.5, 0.5, 0.5),
-    });
-
-    // === CHAPTER NAME (Prominent) ===
-    const pageTitle = sanitizeForPdf(page.title);
-    
-    // Chapter box with background
-    const chapterBoxHeight = 35;
-    contentPage.drawRectangle({
-      x: margin,
-      y: yPos - chapterBoxHeight + 10,
-      width: contentWidth,
-      height: chapterBoxHeight,
-      color: rgb(0.15, 0.35, 0.65),
-    });
-    
-    // Chapter name text (white, centered in box)
-    const chapterTitleWidth = fontBold.widthOfTextAtSize(pageTitle, 16);
-    contentPage.drawText(pageTitle, {
-      x: margin + (contentWidth - chapterTitleWidth) / 2,
-      y: yPos - 15,
-      size: 16,
-      font: fontBold,
-      color: rgb(1, 1, 1),
-    });
-    
-    yPos -= chapterBoxHeight + 25;
-
-    // === SCRIPT SECTION (if available) ===
-    if (page.script) {
-      // Script label
-      contentPage.drawText("Script:", {
-        x: margin,
-        y: yPos,
-        size: 10,
-        font: fontBold,
-        color: rgb(0.3, 0.3, 0.3),
-      });
-      yPos -= 15;
-      
-      // Script content (italic)
-      const scriptLines = wrapText(page.script, contentWidth, fontOblique, 10);
-      scriptLines.slice(0, 5).forEach((line) => {
-        contentPage.drawText(line, {
-          x: margin + 10,
-          y: yPos,
-          size: 10,
-          font: fontOblique,
-          color: rgb(0.35, 0.35, 0.35),
-        });
-        yPos -= 14;
-      });
-      
-      yPos -= 15;
-      
-      // Separator after script
-      contentPage.drawLine({
-        start: { x: margin + 50, y: yPos + 5 },
-        end: { x: pageWidth - margin - 50, y: yPos + 5 },
-        thickness: 0.5,
-        color: rgb(0.8, 0.8, 0.8),
-      });
-      
-      yPos -= 20;
-    }
-
-    // === PANELS SECTION ===
-    // Panels header
-    contentPage.drawText("PANELS", {
-      x: margin,
-      y: yPos,
-      size: 11,
-      font: fontBold,
-      color: rgb(0.2, 0.2, 0.6),
-    });
-    
-    // Underline for panels header
-    const panelsHeaderWidth = fontBold.widthOfTextAtSize("PANELS", 11);
-    contentPage.drawLine({
-      start: { x: margin, y: yPos - 3 },
-      end: { x: margin + panelsHeaderWidth, y: yPos - 3 },
-      thickness: 1.5,
-      color: rgb(0.2, 0.2, 0.6),
-    });
-    
-    yPos -= 25;
-
-    // Panel content
-    for (let panelIndex = 0; panelIndex < page.panels.length; panelIndex++) {
-      const panel = page.panels[panelIndex];
-
-      // Check if we need a new page
-      if (yPos < 120) {
-        const newContentPage = addPage();
-        yPos = pageHeight - 60;
-      }
-
-      // Panel header box
-      const panelHeader = `Panel ${panel.panelNumber || panelIndex + 1}`;
-      const panelHeaderWidth = fontBold.widthOfTextAtSize(panelHeader, 11) + 16;
-      
-      contentPage.drawRectangle({
-        x: margin,
-        y: yPos - 5,
-        width: panelHeaderWidth,
-        height: 18,
-        color: rgb(0.3, 0.3, 0.6),
-      });
-      
-      contentPage.drawText(panelHeader, {
-        x: margin + 8,
-        y: yPos,
-        size: 11,
-        font: fontBold,
-        color: rgb(1, 1, 1),
-      });
-      
-      yPos -= 20;
-
-      // Panel description
-      if (panel.description) {
-        const descLines = wrapText(panel.description, contentWidth - 10, font, 9);
-        descLines.forEach((line) => {
-          contentPage.drawText(line, {
-            x: margin + 5,
-            y: yPos,
-            size: 9,
-            font: font,
-            color: rgb(0.25, 0.25, 0.25),
-          });
-          yPos -= 12;
-        });
-      }
-
-      // Camera and mood
-      if (panel.cameraAngle || panel.mood) {
-        const meta = [];
-        if (panel.cameraAngle) meta.push(`Camera: ${panel.cameraAngle}`);
-        if (panel.mood) meta.push(`Mood: ${panel.mood}`);
-        const metaText = sanitizeForPdf(meta.join("   |   "));
-        contentPage.drawText(metaText, {
-          x: margin + 5,
-          y: yPos,
-          size: 8,
-          font: fontOblique,
-          color: rgb(0.45, 0.45, 0.45),
-        });
-        yPos -= 14;
-      }
-
-      // Dialogue
-      if (panel.dialogue && panel.dialogue.length > 0) {
-        yPos -= 3;
-        
-        for (const d of panel.dialogue) {
-          if (yPos < 80) {
-            const newContentPage = addPage();
-            yPos = pageHeight - 60;
-          }
-
-          const isNarration = d.type === "narration";
-          const isSfx = d.type === "sfx";
-          const charName = sanitizeForPdf(d.character);
-          const dialogueText = sanitizeForPdf(d.text);
-
-          // Character name
-          const prefix = isNarration ? `[${charName}]` : `${charName}:`;
-          contentPage.drawText(prefix, {
-            x: margin + 5,
-            y: yPos,
-            size: 9,
-            font: fontBold,
-            color: rgb(0.2, 0.2, 0.5),
-          });
-          yPos -= 12;
-
-          // Dialogue text
-          const dialogueLines = wrapText(dialogueText, contentWidth - 15, font, 9);
-          dialogueLines.forEach((line) => {
-            const displayText = isSfx ? `*${line}*` : line;
-            contentPage.drawText(displayText, {
-              x: margin + 15,
-              y: yPos,
-              size: 9,
-              font: isNarration || isSfx ? fontOblique : font,
-              color: rgb(0.3, 0.3, 0.3),
-            });
-            yPos -= 11;
-          });
-          yPos -= 5;
-        }
-      }
-
-      // Spacing and separator between panels
-      yPos -= 12;
-      
-      // Dashed separator line between panels
-      const dashLength = 3;
-      const dashGap = 3;
-      const separatorY = yPos + 5;
-      const separatorStartX = margin + 40;
-      const separatorEndX = pageWidth - margin - 40;
-      
-      for (let x = separatorStartX; x < separatorEndX; x += dashLength + dashGap) {
-        const endX = Math.min(x + dashLength, separatorEndX);
-        contentPage.drawLine({
-          start: { x, y: separatorY },
-          end: { x: endX, y: separatorY },
-          thickness: 0.5,
-          color: rgb(0.75, 0.75, 0.75),
-        });
-      }
-      
-      yPos -= 15;
-    }
-
-    // Footer
-    const footerText = sanitizeForPdf(`Comicore AI  |  ${title}`);
-    const footerWidth = font.widthOfTextAtSize(footerText, 8);
-    contentPage.drawText(footerText, {
-      x: (pageWidth - footerWidth) / 2,
-      y: 20,
-      size: 8,
-      font: font,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-  }
-
-  // Set PDF metadata
-  pdfDoc.setTitle(title);
-  pdfDoc.setAuthor(author);
-  pdfDoc.setSubject(sanitizeForPdf(`${project.genre} Comic`));
-  pdfDoc.setKeywords(["comic", "comicore", sanitizeForPdf(project.genre)]);
-  pdfDoc.setProducer("Comicore AI");
-  pdfDoc.setCreator("Comicore AI");
-
-  // Generate PDF bytes
-  return await pdfDoc.save();
 }
 
 /**
  * POST /api/export/pdf
  *
- * Generates a PDF, compresses it, and stores in MongoDB.
- * Returns export ID for later download.
+ * Generates a PDF using HTML+CSS styling and Puppeteer, then stores in MongoDB.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -749,16 +696,20 @@ export async function POST(request: NextRequest) {
 
     const options = {
       title: body.options?.title || project.title,
-      font: body.options?.font || "helvetica",
-      fontSize: body.options?.fontSize || 10,
+      author: body.options?.metadata?.author || "Comicore AI",
       includeCover: body.options?.includeCover !== false,
       includeToc: body.options?.includeToc !== false,
-      includePageNumbers: body.options?.includePageNumbers !== false,
-      metadata: body.options?.metadata || { author: "Comicore AI" },
     };
 
-    // Generate PDF bytes
-    const pdfBytes = await generatePdfBytes(project, options);
+    console.log(`[PDF Export] Generating HTML for: ${options.title}`);
+
+    // Generate HTML content
+    const html = generateComicHtml(project, options);
+
+    console.log(`[PDF Export] Converting HTML to PDF...`);
+
+    // Convert HTML to PDF using Puppeteer
+    const pdfBytes = await generatePdfFromHtml(html);
     const originalSize = pdfBytes.length;
 
     console.log(`[PDF Export] Generated PDF: ${originalSize} bytes`);
@@ -788,11 +739,8 @@ export async function POST(request: NextRequest) {
       originalSize,
       compressedSize,
       options: {
-        font: options.font,
-        fontSize: options.fontSize,
         includeCover: options.includeCover,
         includeToc: options.includeToc,
-        includePageNumbers: options.includePageNumbers,
       },
       pageCount: approvedPages.length,
     });
