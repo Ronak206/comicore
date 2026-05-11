@@ -13,12 +13,6 @@ import {
   Eye,
   X,
   BookOpen,
-  FileText,
-  Archive,
-  Image,
-  Settings2,
-  Type,
-  Check,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -124,18 +118,6 @@ function getGradient(genre: string): string {
   return gradients[genre] || "from-[#1A1A1A] to-[#151515]";
 }
 
-const exportFormats = [
-  { id: "pdf", name: "PDF", icon: FileText, ext: ".pdf" },
-  { id: "cbz", name: "CBZ", icon: Archive, ext: ".cbz" },
-  { id: "images", name: "PNG Images", icon: Image, ext: ".zip" },
-];
-
-const fontOptions = [
-  { id: "helvetica", name: "Helvetica" },
-  { id: "times", name: "Times Roman" },
-  { id: "courier", name: "Courier" },
-];
-
 // ─── Component ───────────────────────────────────
 
 export default function DashboardPage() {
@@ -147,16 +129,7 @@ export default function DashboardPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewProject, setPreviewProject] = useState<ProjectDetail | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [selectedFormat, setSelectedFormat] = useState<string>("pdf");
-  const [exporting, setExporting] = useState(false);
   const [expandedPage, setExpandedPage] = useState<string | null>(null);
-  const [pdfSettings, setPdfSettings] = useState({
-    font: "helvetica",
-    fontSize: 10,
-    includeCover: true,
-    includeToc: true,
-    includePageNumbers: true,
-  });
 
   // Fetch real projects from DB
   useEffect(() => {
@@ -211,74 +184,7 @@ export default function DashboardPage() {
   const closePreview = () => {
     setShowPreview(false);
     setPreviewProject(null);
-    setSelectedFormat("pdf");
     setExpandedPage(null);
-  };
-
-  // Handle export from preview
-  const handleExport = async () => {
-    if (!previewProject) return;
-
-    setExporting(true);
-    try {
-      let endpoint = "/api/export/pdf";
-      let filename = `${previewProject.title.replace(/\s+/g, "-").toLowerCase()}.pdf`;
-
-      if (selectedFormat === "cbz") {
-        endpoint = "/api/export/cbz";
-        filename = `${previewProject.title.replace(/\s+/g, "-").toLowerCase()}.cbz`;
-      } else if (selectedFormat === "images") {
-        endpoint = "/api/export/images";
-        filename = `${previewProject.title.replace(/\s+/g, "-").toLowerCase()}-pages.zip`;
-      }
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: previewProject.id,
-          options: {
-            title: previewProject.title,
-            font: pdfSettings.font,
-            fontSize: pdfSettings.fontSize,
-            includeCover: pdfSettings.includeCover,
-            includeToc: pdfSettings.includeToc,
-            includePageNumbers: pdfSettings.includePageNumbers,
-            metadata: {
-              title: previewProject.title,
-              author: "Comicore AI",
-            },
-          },
-        }),
-      });
-
-      // Check for errors
-      if (!res.ok) {
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-          const data = await res.json();
-          throw new Error(data.error || "Export failed");
-        }
-        throw new Error("Export failed");
-      }
-
-      // Get the PDF blob and download
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      closePreview();
-    } catch (err: any) {
-      setError(err.message || "Export failed");
-    } finally {
-      setExporting(false);
-    }
   };
 
   // Compute stats from real data
@@ -557,10 +463,10 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Preview Modal */}
+      {/* Preview Modal - Preview Only */}
       {showPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="bg-[#0A0A0A] border border-[#222] w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-[#0A0A0A] border border-[#222] w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b border-[#222]">
               <div className="flex items-center gap-3">
@@ -574,12 +480,21 @@ export default function DashboardPage() {
                   </span>
                 )}
               </div>
-              <button
-                onClick={closePreview}
-                className="text-[#666] hover:text-[#F5F5F0] p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/dashboard/export"
+                  className="px-4 py-2 bg-[#E8B931] text-[#0A0A0A] font-bold text-xs tracking-wide uppercase flex items-center gap-2"
+                >
+                  <Download className="w-3 h-3" />
+                  Export
+                </Link>
+                <button
+                  onClick={closePreview}
+                  className="text-[#666] hover:text-[#F5F5F0] p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Content */}
@@ -589,259 +504,166 @@ export default function DashboardPage() {
                   <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
                 </div>
               ) : previewProject ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="space-y-4">
+                  {/* Project Info */}
+                  {previewProject.synopsis && (
+                    <div className="bg-[#111] border border-[#222] p-4 mb-4">
+                      <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
+                        Synopsis
+                      </div>
+                      <p className="text-sm text-[#999]">{previewProject.synopsis}</p>
+                    </div>
+                  )}
+
                   {/* Page List with Content */}
-                  <div className="lg:col-span-2 space-y-3">
-                    <h4 className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase mb-4">
-                      All Pages (Click to expand)
-                    </h4>
-                    
-                    {previewProject.pages
-                      ?.filter((p) => p.status === "approved")
-                      .sort((a, b) => a.number - b.number)
-                      .map((page) => {
-                        const isExpanded = expandedPage === page.id;
-                        return (
-                          <div
-                            key={page.id}
-                            className="bg-[#111] border border-[#222] overflow-hidden"
-                          >
-                            {/* Page Header - Clickable */}
-                            <button
-                              onClick={() => togglePageExpand(page.id)}
-                              className="w-full p-4 flex items-center justify-between hover:bg-[#1A1A1A] transition-colors"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center">
-                                  {page.number}
-                                </div>
-                                <div className="text-left">
-                                  <div className="text-sm font-bold text-[#F5F5F0]">
-                                    {page.title}
-                                  </div>
-                                  <div className="text-[10px] text-[#555]">
-                                    {page.panels?.length || 0} panels
-                                  </div>
-                                </div>
-                              </div>
-                              {isExpanded ? (
-                                <ChevronUp className="w-4 h-4 text-[#666]" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4 text-[#666]" />
-                              )}
-                            </button>
-
-                            {/* Expanded Content */}
-                            {isExpanded && (
-                              <div className="px-4 pb-4 border-t border-[#222] pt-4">
-                                {/* Script */}
-                                {page.script && (
-                                  <div className="mb-4">
-                                    <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
-                                      Script Summary
-                                    </div>
-                                    <p className="text-xs text-[#999] leading-relaxed">
-                                      {page.script}
-                                    </p>
-                                  </div>
-                                )}
-
-                                {/* Panels */}
-                                {page.panels && page.panels.length > 0 && (
-                                  <div className="space-y-4">
-                                    <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
-                                      Panels
-                                    </div>
-                                    {page.panels.map((panel, idx) => (
-                                      <div
-                                        key={idx}
-                                        className="bg-[#0A0A0A] border border-[#222] p-3"
-                                      >
-                                        <div className="flex items-center justify-between mb-2">
-                                          <span className="text-xs font-bold text-[#F5F5F0]">
-                                            Panel {panel.panelNumber || idx + 1}
-                                          </span>
-                                          <div className="flex items-center gap-2">
-                                            {panel.cameraAngle && (
-                                              <span className="text-[9px] text-[#555] bg-[#1A1A1A] px-2 py-0.5">
-                                                {panel.cameraAngle}
-                                              </span>
-                                            )}
-                                            {panel.mood && (
-                                              <span className="text-[9px] text-[#555] bg-[#1A1A1A] px-2 py-0.5">
-                                                {panel.mood}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        {/* Description */}
-                                        <p className="text-[11px] text-[#888] mb-2">
-                                          {panel.description}
-                                        </p>
-
-                                        {/* Dialogue */}
-                                        {panel.dialogue && panel.dialogue.length > 0 && (
-                                          <div className="space-y-2 mt-3 border-t border-[#222] pt-3">
-                                            {panel.dialogue.map((d, di) => (
-                                              <div key={di} className="text-[11px]">
-                                                <span className="text-[#E8B931] font-bold">
-                                                  {d.type === "narration" ? "NARRATOR" : d.character}:
-                                                </span>{" "}
-                                                <span className="text-[#999] italic">
-                                                  "{d.text}"
-                                                </span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                  </div>
-
-                  {/* Export Options */}
-                  <div className="space-y-4">
-                    {/* Format Selection */}
-                    <div className="bg-[#111] border border-[#222] p-4">
-                      <h4 className="text-xs font-bold text-[#999] tracking-[0.15em] uppercase mb-3">
-                        Export Format
-                      </h4>
-                      <div className="space-y-2">
-                        {exportFormats.map((format) => (
+                  <h4 className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase">
+                    All Pages (Click to expand)
+                  </h4>
+                  
+                  {previewProject.pages
+                    ?.filter((p) => p.status === "approved")
+                    .sort((a, b) => a.number - b.number)
+                    .map((page) => {
+                      const isExpanded = expandedPage === page.id;
+                      return (
+                        <div
+                          key={page.id}
+                          className="bg-[#111] border border-[#222] overflow-hidden"
+                        >
+                          {/* Page Header - Clickable */}
                           <button
-                            key={format.id}
-                            onClick={() => setSelectedFormat(format.id)}
-                            className={`w-full flex items-center gap-3 p-3 border transition-colors ${
-                              selectedFormat === format.id
-                                ? "border-[#E8B931] bg-[#E8B931]/5"
-                                : "border-[#222] hover:border-[#333]"
-                            }`}
+                            onClick={() => togglePageExpand(page.id)}
+                            className="w-full p-4 flex items-center justify-between hover:bg-[#1A1A1A] transition-colors"
                           >
-                            <format.icon className="w-4 h-4 text-[#E8B931]" />
-                            <div className="flex-1 text-left">
-                              <div className="text-xs text-[#F5F5F0]">{format.name}</div>
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center">
+                                {page.number}
+                              </div>
+                              <div className="text-left">
+                                <div className="text-sm font-bold text-[#F5F5F0]">
+                                  {page.title}
+                                </div>
+                                <div className="text-[10px] text-[#555]">
+                                  {page.panels?.length || 0} panels
+                                </div>
+                              </div>
                             </div>
-                            {selectedFormat === format.id && (
-                              <Check className="w-4 h-4 text-[#E8B931]" />
+                            {isExpanded ? (
+                              <ChevronUp className="w-4 h-4 text-[#666]" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-[#666]" />
                             )}
                           </button>
-                        ))}
-                      </div>
+
+                          {/* Expanded Content */}
+                          {isExpanded && (
+                            <div className="px-4 pb-4 border-t border-[#222] pt-4">
+                              {/* Script */}
+                              {page.script && (
+                                <div className="mb-4">
+                                  <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
+                                    Script Summary
+                                  </div>
+                                  <p className="text-xs text-[#999] leading-relaxed">
+                                    {page.script}
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Panels */}
+                              {page.panels && page.panels.length > 0 && (
+                                <div className="space-y-4">
+                                  <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
+                                    Panels
+                                  </div>
+                                  {page.panels.map((panel, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="bg-[#0A0A0A] border border-[#222] p-3"
+                                    >
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-[#F5F5F0]">
+                                          Panel {panel.panelNumber || idx + 1}
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          {panel.cameraAngle && (
+                                            <span className="text-[9px] text-[#555] bg-[#1A1A1A] px-2 py-0.5">
+                                              {panel.cameraAngle}
+                                            </span>
+                                          )}
+                                          {panel.mood && (
+                                            <span className="text-[9px] text-[#555] bg-[#1A1A1A] px-2 py-0.5">
+                                              {panel.mood}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Description */}
+                                      <p className="text-[11px] text-[#888] mb-2">
+                                        {panel.description}
+                                      </p>
+
+                                      {/* Dialogue */}
+                                      {panel.dialogue && panel.dialogue.length > 0 && (
+                                        <div className="space-y-2 mt-3 border-t border-[#222] pt-3">
+                                          {panel.dialogue.map((d, di) => (
+                                            <div key={di} className="text-[11px]">
+                                              <span className="text-[#E8B931] font-bold">
+                                                {d.type === "narration" ? "NARRATOR" : d.character}:
+                                              </span>{" "}
+                                              <span className="text-[#999] italic">
+                                                "{d.text}"
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                  {/* No pages message */}
+                  {(!previewProject.pages || previewProject.pages.filter((p) => p.status === "approved").length === 0) && (
+                    <div className="text-center py-8 text-[#666]">
+                      <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No approved pages yet</p>
                     </div>
-
-                    {/* PDF Settings */}
-                    {selectedFormat === "pdf" && (
-                      <div className="bg-[#111] border border-[#222] p-4">
-                        <h4 className="text-xs font-bold text-[#999] tracking-[0.15em] uppercase mb-3 flex items-center gap-2">
-                          <Settings2 className="w-3 h-3" /> PDF Settings
-                        </h4>
-
-                        {/* Font */}
-                        <div className="mb-4">
-                          <label className="text-[10px] text-[#666] uppercase tracking-wider mb-2 block flex items-center gap-1">
-                            <Type className="w-3 h-3" /> Font
-                          </label>
-                          <select
-                            value={pdfSettings.font}
-                            onChange={(e) =>
-                              setPdfSettings((prev) => ({ ...prev, font: e.target.value }))
-                            }
-                            className="w-full bg-[#0A0A0A] border border-[#222] text-xs text-[#F5F5F0] p-2"
-                          >
-                            {fontOptions.map((font) => (
-                              <option key={font.id} value={font.id}>
-                                {font.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Options */}
-                        <div className="space-y-2">
-                          <label className="flex items-center gap-2 text-[10px] text-[#999]">
-                            <input
-                              type="checkbox"
-                              checked={pdfSettings.includeCover}
-                              onChange={(e) =>
-                                setPdfSettings((prev) => ({
-                                  ...prev,
-                                  includeCover: e.target.checked,
-                                }))
-                              }
-                              className="accent-[#E8B931]"
-                            />
-                            Include cover page
-                          </label>
-                          <label className="flex items-center gap-2 text-[10px] text-[#999]">
-                            <input
-                              type="checkbox"
-                              checked={pdfSettings.includeToc}
-                              onChange={(e) =>
-                                setPdfSettings((prev) => ({
-                                  ...prev,
-                                  includeToc: e.target.checked,
-                                }))
-                              }
-                              className="accent-[#E8B931]"
-                            />
-                            Include table of contents
-                          </label>
-                          <label className="flex items-center gap-2 text-[10px] text-[#999]">
-                            <input
-                              type="checkbox"
-                              checked={pdfSettings.includePageNumbers}
-                              onChange={(e) =>
-                                setPdfSettings((prev) => ({
-                                  ...prev,
-                                  includePageNumbers: e.target.checked,
-                                }))
-                              }
-                              className="accent-[#E8B931]"
-                            />
-                            Include page numbers
-                          </label>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Download Button */}
-                    <button
-                      onClick={handleExport}
-                      disabled={exporting}
-                      className="w-full py-3 bg-[#E8B931] text-[#0A0A0A] font-bold tracking-[0.1em] uppercase text-xs flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      {exporting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Exporting...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" />
-                          Download {exportFormats.find((f) => f.id === selectedFormat)?.name}
-                        </>
-                      )}
-                    </button>
-
-                    {/* Continue Editing Link */}
-                    <Link
-                      href={`/dashboard/comic/${previewProject.id}`}
-                      onClick={closePreview}
-                      className="block w-full py-3 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase text-center"
-                    >
-                      Continue Editing
-                    </Link>
-                  </div>
+                  )}
                 </div>
               ) : null}
             </div>
+
+            {/* Modal Footer */}
+            {previewProject && (
+              <div className="p-4 border-t border-[#222] flex items-center justify-between">
+                <div className="text-xs text-[#555]">
+                  To download, go to Export page
+                </div>
+                <div className="flex items-center gap-3">
+                  <Link
+                    href={`/dashboard/comic/${previewProject.id}`}
+                    onClick={closePreview}
+                    className="px-4 py-2 border border-[#333] text-[#F5F5F0] text-xs tracking-wide uppercase"
+                  >
+                    Continue Editing
+                  </Link>
+                  <Link
+                    href="/dashboard/export"
+                    className="px-4 py-2 bg-[#E8B931] text-[#0A0A0A] font-bold text-xs tracking-wide uppercase flex items-center gap-2"
+                  >
+                    <Download className="w-3 h-3" />
+                    Go to Export
+                  </Link>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
