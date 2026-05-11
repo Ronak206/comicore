@@ -56,3 +56,10 @@ server.log
 
 # File-based database
 /data/upload/
+node_modules 
+.env 
+downloads 
+pages
+comic.json 
+panelBlueprints.json 
+storyPlanner.json
