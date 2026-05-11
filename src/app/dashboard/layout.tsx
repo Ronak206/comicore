@@ -149,19 +149,25 @@ export default function DashboardLayout({
 
         {/* Sidebar footer - User info */}
         <div className="p-4 border-t border-[#222]">
-          <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 bg-[#E8B931] flex items-center justify-center text-xs font-bold text-[#0A0A0A]">
-              {user ? getInitials(displayName) : <Zap className="w-4 h-4" />}
+          <Link href="/dashboard/settings" className="flex items-center gap-3 px-2 py-2 -mx-2 rounded hover:bg-[#111] transition-colors">
+            <div className="w-10 h-10 bg-gradient-to-br from-[#E8B931] to-[#c9a020] flex items-center justify-center text-sm font-bold text-[#0A0A0A] rounded">
+              {user ? getInitials(displayName) : <Zap className="w-5 h-5" />}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-[#F5F5F0] truncate">
+              <div className="text-sm font-semibold text-[#F5F5F0] truncate">
                 {displayName}
               </div>
-              <div className="text-xs text-[#555] truncate">
-                {user?.plan?.toUpperCase() || "FREE"} Plan
+              <div className="text-xs text-[#888] truncate">
+                {user?.email || "No email"}
+              </div>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-[10px] text-[#E8B931] font-medium uppercase tracking-wider">
+                  {user?.plan?.toUpperCase() || "FREE"}
+                </span>
+                <span className="text-[10px] text-[#555]">Plan</span>
               </div>
             </div>
-          </div>
+          </Link>
         </div>
       </aside>
 
