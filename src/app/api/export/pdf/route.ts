@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { promisify } from "util";
-import zlib from "zlib";
 import { connectDB } from "@/lib/mongodb";
 import Export from "@/lib/models/Export";
-
-const gzip = promisify(zlib.gzip);
-const gunzip = promisify(zlib.gunzip);
 
 /**
  * Sanitize text for WinAnsi encoding (pdf-lib standard fonts)
@@ -485,8 +480,16 @@ export async function POST(request: NextRequest) {
 
     console.log(`[PDF Export] Generated PDF: ${originalSize} bytes`);
 
-    // Compress PDF using gzip
-    const compressedBuffer = await gzip(Buffer.from(pdfBytes));
+    // Compress PDF using zlib (gzip)
+    const zlib = await import('zlib');
+    const gzipPromise = () => new Promise<Buffer>((resolve, reject) => {
+      zlib.gzip(Buffer.from(pdfBytes), (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    });
+
+    const compressedBuffer = await gzipPromise();
     const compressedSize = compressedBuffer.length;
 
     console.log(`[PDF Export] Compressed: ${compressedSize} bytes (${Math.round((1 - compressedSize / originalSize) * 100)}% reduction)`);
@@ -533,10 +536,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-/**
- * GET /api/export/pdf/[id]
- *
- * Retrieves and decompresses PDF from MongoDB for download.
- * This is handled in the dynamic route file.
- */

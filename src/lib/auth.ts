@@ -59,25 +59,46 @@ export function verifyToken(token: string): JWTPayload | null {
  */
 export async function setSessionCookie(token: string) {
   const cookieStore = await cookies();
+  const isProduction = process.env.NODE_ENV === 'production';
+  
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
     sameSite: 'lax',
     maxAge: 60 * 60 * 24 * 7, // 7 days
     path: '/',
+    // Ensure cookie works in all environments
+    ...(isProduction ? {} : { domain: undefined }),
   });
+  
+  console.log('[Auth] Session cookie set successfully');
 }
 
 /**
  * Get current session from cookie
  */
 export async function getSession(): Promise<JWTPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  
-  if (!token) return null;
-  
-  return verifyToken(token);
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    
+    if (!token) {
+      console.log('[Auth] No session cookie found');
+      return null;
+    }
+    
+    const payload = verifyToken(token);
+    if (!payload) {
+      console.log('[Auth] Token verification failed');
+      return null;
+    }
+    
+    console.log('[Auth] Session found for user:', payload.email);
+    return payload;
+  } catch (error) {
+    console.error('[Auth] Error getting session:', error);
+    return null;
+  }
 }
 
 /**
@@ -94,12 +115,27 @@ export async function clearSession() {
 export async function getCurrentUser() {
   const session = await getSession();
   
-  if (!session) return null;
+  if (!session) {
+    console.log('[Auth] No session, returning null user');
+    return null;
+  }
   
-  await connectDB();
-  
-  const user = await User.findById(session.userId).select('-password');
-  return user;
+  try {
+    await connectDB();
+    
+    const user = await User.findById(session.userId).select('-password');
+    
+    if (!user) {
+      console.log('[Auth] User not found in database for ID:', session.userId);
+      return null;
+    }
+    
+    console.log('[Auth] User found:', user.email);
+    return user;
+  } catch (error) {
+    console.error('[Auth] Error fetching user:', error);
+    return null;
+  }
 }
 
 /**

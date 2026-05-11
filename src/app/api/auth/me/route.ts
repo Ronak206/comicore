@@ -8,6 +8,7 @@ import { getCurrentUser, getSession } from '@/lib/auth';
 
 export async function GET() {
   try {
+    // First check if session exists
     const session = await getSession();
     
     if (!session) {
@@ -17,6 +18,7 @@ export async function GET() {
       }, { status: 401 });
     }
     
+    // Then get the full user from database
     const user = await getCurrentUser();
     
     if (!user) {
@@ -29,7 +31,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       user: {
-        id: user._id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         plan: user.plan,

@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promisify } from "util";
-import zlib from "zlib";
 import { connectDB } from "@/lib/mongodb";
 import Export from "@/lib/models/Export";
-
-const gunzip = promisify(zlib.gunzip);
+import zlib from "zlib";
 
 /**
  * GET /api/export/pdf/[id]
@@ -55,8 +52,23 @@ export async function GET(
     console.log(`[PDF Download] Compressed size: ${exportDoc.compressedSize} bytes`);
     console.log(`[PDF Download] Original size: ${exportDoc.originalSize} bytes`);
 
+    // Get the buffer data from MongoDB
+    // MongoDB stores buffers as Buffer objects
+    const compressedBuffer = Buffer.isBuffer(exportDoc.compressedData) 
+      ? exportDoc.compressedData 
+      : Buffer.from(exportDoc.compressedData.buffer || exportDoc.compressedData);
+
     // Decompress the PDF data
-    const decompressedBuffer = await gunzip(exportDoc.compressedData);
+    const decompressedBuffer = await new Promise<Buffer>((resolve, reject) => {
+      zlib.gunzip(compressedBuffer, (err, result) => {
+        if (err) {
+          console.error("[PDF Download] Gunzip error:", err);
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      });
+    });
 
     console.log(`[PDF Download] Decompressed size: ${decompressedBuffer.length} bytes`);
 
@@ -64,6 +76,18 @@ export async function GET(
     if (decompressedBuffer.length !== exportDoc.originalSize) {
       console.warn(`[PDF Download] Size mismatch: expected ${exportDoc.originalSize}, got ${decompressedBuffer.length}`);
     }
+
+    // Verify PDF header
+    const pdfHeader = decompressedBuffer.slice(0, 5).toString();
+    if (pdfHeader !== '%PDF-') {
+      console.error(`[PDF Download] Invalid PDF header: ${pdfHeader}`);
+      return NextResponse.json(
+        { success: false, error: "Generated file is not a valid PDF." },
+        { status: 500 }
+      );
+    }
+
+    console.log(`[PDF Download] Valid PDF header confirmed`);
 
     // Generate safe filename
     const safeFilename = exportDoc.title
@@ -78,7 +102,7 @@ export async function GET(
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${safeFilename}.pdf"`,
         "Content-Length": decompressedBuffer.length.toString(),
-        "Cache-Control": "public, max-age=3600", // Cache for 1 hour
+        "Cache-Control": "public, max-age=3600",
       },
     });
   } catch (error: any) {
