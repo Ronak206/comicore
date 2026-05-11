@@ -56,8 +56,8 @@ export default function DashboardLayout({
       .slice(0, 2);
   };
 
-  // Get display name
-  const displayName = user?.name && user.name !== "Creator" ? user.name : (user?.email?.split("@")[0] || "User");
+  // Get display name - show actual name from database
+  const displayName = user?.name || user?.email?.split("@")[0] || "User";
 
   // Loading state
   if (loading) {
