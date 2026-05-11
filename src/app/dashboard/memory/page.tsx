@@ -5,8 +5,6 @@ import Link from "next/link";
 import {
   Brain,
   Database,
-  Eye,
-  Layers,
   ChevronRight,
   Users,
   BookOpen,
@@ -17,11 +15,13 @@ import {
   Image,
   Loader2,
   Download,
-  Trash2,
   RefreshCw,
+  Globe,
+  ChevronLeft,
+  Layers,
 } from "lucide-react";
 
-type MemoryTab = "overview" | "characters" | "visual" | "panels";
+type MemoryTab = "overview" | "characters" | "visual" | "panels" | "world";
 
 interface ExportItem {
   id: string;
@@ -42,99 +42,152 @@ interface ExportStats {
   totalSize: string;
 }
 
-const characters = [
-  {
-    name: "Kai Nakamura",
-    role: "Protagonist",
-    comic: "The Last Cyberpunk",
-    appearances: 24,
-    lastSeen: "Page 24",
-    attributes: ["Scar on left eye", "Cybernetic arm (right)", "Silver hair", "Black trench coat"],
-    status: "Active",
-  },
-  {
-    name: "Zero",
-    role: "Antagonist",
-    comic: "The Last Cyberpunk",
-    appearances: 18,
-    lastSeen: "Page 22",
-    attributes: ["White mask", "Red eyes", "Tall silhouette", "No speech"],
-    status: "Active",
-  },
-  {
-    name: "Lyra Chen",
-    role: "Supporting",
-    comic: "Shadow Walker Chronicles",
-    appearances: 12,
-    lastSeen: "Page 18",
-    attributes: ["Short black hair", "Green eyes", "Mechanic outfit", "Wrench weapon"],
-    status: "Active",
-  },
-  {
-    name: "Marcus Cole",
-    role: "Protagonist",
-    comic: "Shadow Walker Chronicles",
-    appearances: 18,
-    lastSeen: "Page 18",
-    attributes: ["Brown skin", "Bald head", "Shadow powers", "Tactical vest"],
-    status: "Active",
-  },
-];
+interface Pagination {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
 
-const memoryLayers = [
-  {
-    name: "Story Memory",
-    icon: BookOpen,
-    description: "Plot arcs, character relationships, dialogue patterns, story beats",
-    entries: 847,
-    health: 94,
-  },
-  {
-    name: "Visual Memory",
-    icon: Eye,
-    description: "Character designs, art style consistency, color palettes, environment details",
-    entries: 1243,
-    health: 91,
-  },
-  {
-    name: "Panel Memory",
-    icon: Layers,
-    description: "Layout patterns, panel compositions, pacing rhythm, page flow",
-    entries: 412,
-    health: 97,
-  },
-];
+interface MemoryCharacter {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  name: string;
+  role: string;
+  description: string;
+  appearance: string;
+  personality: string;
+}
+
+interface VisualStyle {
+  id: string;
+  bookTitle: string;
+  artStyle: string;
+  colorPalette: string;
+  panelDensity: string;
+  speechBubbleStyle: string;
+  narrationStyle: string;
+  detailLevel: string;
+  referenceNotes: string;
+}
+
+interface PanelLayout {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  pageNumber: number;
+  title: string;
+  description: string;
+  chapter: string;
+  chapterNumber: number;
+  chapterTitle: string;
+  keyEvents: string[];
+}
+
+interface WorldInfo {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  setting: string;
+  timePeriod: string;
+  atmosphere: string;
+  technology: string;
+  keyLocations: string;
+  rules: string;
+}
+
+interface OverviewItem {
+  id: string;
+  title: string;
+  genre: string;
+  synopsis: string;
+  tone: string;
+  status: string;
+  chapterCount: number;
+  pageCount: number;
+}
+
+interface MemoryStats {
+  totalBooks: number;
+  totalCharacters: number;
+  totalWorlds: number;
+  totalPages: number;
+  totalChapters: number;
+}
 
 export default function MemoryBankPage() {
   const [activeTab, setActiveTab] = useState<MemoryTab>("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // Exports state with pagination
   const [exports, setExports] = useState<ExportItem[]>([]);
   const [exportStats, setExportStats] = useState<ExportStats>({ totalExports: 0, totalSize: "0 KB" });
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 5, totalPages: 1, hasNextPage: false, hasPrevPage: false });
   const [loadingExports, setLoadingExports] = useState(true);
+  
+  // Memory data state
+  const [overview, setOverview] = useState<OverviewItem[]>([]);
+  const [characters, setCharacters] = useState<MemoryCharacter[]>([]);
+  const [visualStyles, setVisualStyles] = useState<VisualStyle[]>([]);
+  const [panelLayouts, setPanelLayouts] = useState<PanelLayout[]>([]);
+  const [worldInfo, setWorldInfo] = useState<WorldInfo[]>([]);
+  const [memoryStats, setMemoryStats] = useState<MemoryStats>({ totalBooks: 0, totalCharacters: 0, totalWorlds: 0, totalPages: 0, totalChapters: 0 });
+  const [loadingMemory, setLoadingMemory] = useState(true);
 
-  // Fetch exports
-  useEffect(() => {
-    async function fetchExports() {
-      try {
-        setLoadingExports(true);
-        const res = await fetch("/api/exports");
-        const data = await res.json();
-        if (data.success) {
-          setExports(data.data || []);
-          setExportStats(data.stats || { totalExports: 0, totalSize: "0 KB" });
-        }
-      } catch (error) {
-        console.error("Failed to fetch exports:", error);
-      } finally {
-        setLoadingExports(false);
+  // Fetch exports with pagination
+  const fetchExports = async (page: number = 1) => {
+    try {
+      setLoadingExports(true);
+      const res = await fetch(`/api/exports?page=${page}&pageSize=${pagination.pageSize}`);
+      const data = await res.json();
+      if (data.success) {
+        setExports(data.data || []);
+        setExportStats(data.stats || { totalExports: 0, totalSize: "0 KB" });
+        setPagination(data.pagination || pagination);
       }
+    } catch (error) {
+      console.error("Failed to fetch exports:", error);
+    } finally {
+      setLoadingExports(false);
     }
-    fetchExports();
+  };
+
+  // Fetch memory bank data
+  const fetchMemoryData = async () => {
+    try {
+      setLoadingMemory(true);
+      const res = await fetch("/api/memory/bank");
+      const data = await res.json();
+      if (data.success) {
+        setOverview(data.data.overview || []);
+        setCharacters(data.data.characters || []);
+        setVisualStyles(data.data.visualStyles || []);
+        setPanelLayouts(data.data.panelLayouts || []);
+        setWorldInfo(data.data.worldInfo || []);
+        setMemoryStats(data.stats || memoryStats);
+      }
+    } catch (error) {
+      console.error("Failed to fetch memory data:", error);
+    } finally {
+      setLoadingMemory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchExports(1);
+    fetchMemoryData();
   }, []);
 
   const filteredCharacters = characters.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.comic.toLowerCase().includes(searchQuery.toLowerCase())
+    c.bookTitle.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredWorlds = worldInfo.filter((w) =>
+    w.bookTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    w.setting.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const formatDate = (dateStr: string) => {
@@ -155,6 +208,10 @@ export default function MemoryBankPage() {
     }
   };
 
+  const handlePageChange = (newPage: number) => {
+    fetchExports(newPage);
+  };
+
   return (
     <div className="space-y-8">
       {/* Page header */}
@@ -163,43 +220,8 @@ export default function MemoryBankPage() {
           <span className="text-stroke">MEMORY</span> Bank
         </h2>
         <p className="text-sm text-[#666]">
-          Three-layer memory system keeping your comics consistent across every page.
+          View your comics&apos; memory data: Overview, Characters, Visual Styles, Panel Layouts, and World Info.
         </p>
-      </div>
-
-      {/* Memory health overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {memoryLayers.map((layer) => (
-          <div key={layer.name} className="bg-[#111] border border-[#222] p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-[#E8B931]/10 flex items-center justify-center">
-                  <layer.icon className="w-4 h-4 text-[#E8B931]" />
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-[#F5F5F0]">{layer.name}</div>
-                  <div className="text-[10px] text-[#555] tracking-widest uppercase">
-                    {layer.entries} entries
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-lg font-black text-[#E8B931]">{layer.health}%</div>
-                <div className="text-[10px] text-[#555] uppercase">Health</div>
-              </div>
-            </div>
-            {/* Health bar */}
-            <div className="w-full h-1.5 bg-[#222] mb-3">
-              <div
-                className="h-full bg-[#E8B931]"
-                style={{ width: `${layer.health}%` }}
-              />
-            </div>
-            <div className="text-xs text-[#666] leading-relaxed">
-              {layer.description}
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* Generated Exports Section */}
@@ -230,7 +252,7 @@ export default function MemoryBankPage() {
           </div>
         ) : exports.length > 0 ? (
           <div className="space-y-3">
-            {exports.slice(0, 5).map((exp) => {
+            {exports.map((exp) => {
               const FormatIcon = getFormatIcon(exp.format);
               return (
                 <div
@@ -266,13 +288,38 @@ export default function MemoryBankPage() {
                 </div>
               );
             })}
-            {exports.length > 5 && (
-              <Link
-                href="/dashboard/export"
-                className="block text-center text-xs text-[#666] py-3 hover:text-[#E8B931] transition-colors"
-              >
-                View all {exports.length} exports →
-              </Link>
+            
+            {/* Pagination Controls */}
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between pt-4 border-t border-[#222]">
+                <div className="text-xs text-[#666]">
+                  Page {pagination.page} of {pagination.totalPages}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePageChange(pagination.page - 1)}
+                    disabled={!pagination.hasPrevPage}
+                    className={`p-2 border border-[#222] transition-colors ${
+                      pagination.hasPrevPage
+                        ? "text-[#F5F5F0] hover:border-[#E8B931] hover:text-[#E8B931]"
+                        : "text-[#333] cursor-not-allowed"
+                    }`}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handlePageChange(pagination.page + 1)}
+                    disabled={!pagination.hasNextPage}
+                    className={`p-2 border border-[#222] transition-colors ${
+                      pagination.hasNextPage
+                        ? "text-[#F5F5F0] hover:border-[#E8B931] hover:text-[#E8B931]"
+                        : "text-[#333] cursor-not-allowed"
+                    }`}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         ) : (
@@ -290,93 +337,126 @@ export default function MemoryBankPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-[#222]">
+      <div className="flex gap-1 border-b border-[#222] overflow-x-auto">
         {[
-          { key: "overview" as MemoryTab, label: "Overview" },
-          { key: "characters" as MemoryTab, label: "Characters" },
-          { key: "visual" as MemoryTab, label: "Visual Style" },
-          { key: "panels" as MemoryTab, label: "Panel Layouts" },
+          { key: "overview" as MemoryTab, label: "Overview", icon: BookOpen },
+          { key: "characters" as MemoryTab, label: "Characters", icon: Users },
+          { key: "visual" as MemoryTab, label: "Visual Style", icon: Palette },
+          { key: "panels" as MemoryTab, label: "Panel Layouts", icon: Layers },
+          { key: "world" as MemoryTab, label: "World Info", icon: Globe },
         ].map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-3 text-xs tracking-widest uppercase transition-colors ${
+            className={`px-4 py-3 text-xs tracking-widest uppercase transition-colors flex items-center gap-2 whitespace-nowrap ${
               activeTab === tab.key
                 ? "text-[#E8B931] border-b-2 border-[#E8B931]"
                 : "text-[#666]"
             }`}
           >
+            <tab.icon className="w-3.5 h-3.5" />
             {tab.label}
           </button>
         ))}
       </div>
 
+      {/* Loading State */}
+      {loadingMemory && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 text-[#E8B931] animate-spin" />
+        </div>
+      )}
+
       {/* Tab Content */}
-      {activeTab === "overview" && (
+      {!loadingMemory && activeTab === "overview" && (
         <div className="space-y-6">
           {/* Stats row */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-[#111] border border-[#222] p-4">
-              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Memory</div>
-              <div className="text-2xl font-black text-[#E8B931]">{exportStats.totalSize}</div>
-              <div className="text-xs text-[#555]">Across all comics</div>
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Total Projects</div>
+              <div className="text-2xl font-black text-[#E8B931]">{memoryStats.totalBooks}</div>
+              <div className="text-xs text-[#555]">Comics created</div>
             </div>
             <div className="bg-[#111] border border-[#222] p-4">
               <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Characters</div>
-              <div className="text-2xl font-black text-[#E8B931]">38</div>
+              <div className="text-2xl font-black text-[#E8B931]">{memoryStats.totalCharacters}</div>
               <div className="text-xs text-[#555]">Fully tracked</div>
             </div>
             <div className="bg-[#111] border border-[#222] p-4">
-              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Compression</div>
-              <div className="text-2xl font-black text-[#E8B931]">~50%</div>
-              <div className="text-xs text-[#555]">Auto-optimized</div>
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Worlds</div>
+              <div className="text-2xl font-black text-[#E8B931]">{memoryStats.totalWorlds}</div>
+              <div className="text-xs text-[#555]">World settings</div>
             </div>
             <div className="bg-[#111] border border-[#222] p-4">
-              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Consistency</div>
-              <div className="text-2xl font-black text-[#E8B931]">94%</div>
-              <div className="text-xs text-[#555]">Cross-page score</div>
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Pages</div>
+              <div className="text-2xl font-black text-[#E8B931]">{memoryStats.totalPages}</div>
+              <div className="text-xs text-[#555]">Total pages</div>
+            </div>
+            <div className="bg-[#111] border border-[#222] p-4">
+              <div className="text-xs text-[#666] tracking-[0.15em] uppercase mb-1">Chapters</div>
+              <div className="text-2xl font-black text-[#E8B931]">{memoryStats.totalChapters}</div>
+              <div className="text-xs text-[#555]">Story chapters</div>
             </div>
           </div>
 
-          {/* Compression info */}
+          {/* Projects List */}
           <div className="bg-[#111] border border-[#222] p-6">
             <h3 className="text-xs font-bold text-[#E8B931] tracking-[0.2em] uppercase mb-4">
-              Memory Compression Engine
+              Your Projects
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-[#0A0A0A] border border-[#222] p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <RefreshCw className="w-4 h-4 text-[#E8B931]" />
-                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Auto Compression</span>
-                </div>
-                <p className="text-xs text-[#666] leading-relaxed">
-                  PDFs and exports are automatically compressed using gzip before storage. Typical compression ratio is 50-70% of original size.
-                </p>
+            {overview.length > 0 ? (
+              <div className="space-y-3">
+                {overview.map((project) => (
+                  <Link
+                    key={project.id}
+                    href={`/dashboard/comic/${project.id}`}
+                    className="block bg-[#0A0A0A] border border-[#222] p-4 hover:border-[#E8B931]/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-sm font-bold text-[#F5F5F0]">{project.title}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] text-[#E8B931] uppercase tracking-wider">
+                            {project.genre}
+                          </span>
+                          <span className="text-[10px] text-[#555]">•</span>
+                          <span className="text-[10px] text-[#555]">{project.tone}</span>
+                        </div>
+                        <p className="text-xs text-[#666] mt-2 line-clamp-2">{project.synopsis}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-[10px] uppercase tracking-wider border px-2 py-1 ${
+                          project.status === "complete" ? "border-green-500/30 text-green-400" :
+                          project.status === "generating" ? "border-[#E8B931]/30 text-[#E8B931]" :
+                          "border-[#555] text-[#555]"
+                        }`}>
+                          {project.status}
+                        </span>
+                        <div className="text-[10px] text-[#555] mt-2">
+                          {project.chapterCount} ch • {project.pageCount} pages
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
               </div>
-              <div className="bg-[#0A0A0A] border border-[#222] p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Database className="w-4 h-4 text-[#E8B931]" />
-                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">MongoDB Storage</span>
-                </div>
-                <p className="text-xs text-[#666] leading-relaxed">
-                  All exports are stored in MongoDB with compression. Download anytime without regeneration. Old exports auto-cleanup.
-                </p>
+            ) : (
+              <div className="text-center py-8 text-[#555]">
+                <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No projects yet</p>
+                <Link
+                  href="/dashboard/create"
+                  className="text-xs text-[#E8B931] hover:underline mt-2 inline-block"
+                >
+                  Create your first project →
+                </Link>
               </div>
-              <div className="bg-[#0A0A0A] border border-[#222] p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Brain className="w-4 h-4 text-[#E8B931]" />
-                  <span className="text-xs text-[#F5F5F0] font-bold uppercase tracking-wider">Memory Layers</span>
-                </div>
-                <p className="text-xs text-[#666] leading-relaxed">
-                  Three-layer memory: Story (plot, dialogue), Visual (style, colors), Panel (layouts, flow). All tracked automatically.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
 
-      {activeTab === "characters" && (
+      {!loadingMemory && activeTab === "characters" && (
         <div className="space-y-4">
           {/* Search */}
           <div className="relative max-w-md">
@@ -385,173 +465,245 @@ export default function MemoryBankPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search characters by name or comic..."
+              placeholder="Search characters by name or project..."
               className="w-full pl-10 pr-4 py-3 bg-[#111] border border-[#222] text-sm text-[#F5F5F0] placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none"
             />
           </div>
 
           {/* Characters list */}
-          <div className="space-y-3">
-            {filteredCharacters.map((char) => (
-              <div key={char.name} className="bg-[#111] border border-[#222] p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-[#222] flex items-center justify-center text-xs font-bold text-[#E8B931]">
-                      {char.name.split(" ").map((n) => n[0]).join("")}
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-[#F5F5F0]">{char.name}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-[#E8B931] tracking-widest uppercase border border-[#E8B931]/30 px-1.5 py-0.5">
-                          {char.role}
-                        </span>
-                        <span className="text-[10px] text-[#555]">
-                          {char.comic}
-                        </span>
+          {filteredCharacters.length > 0 ? (
+            <div className="space-y-3">
+              {filteredCharacters.map((char) => (
+                <div key={char.id} className="bg-[#111] border border-[#222] p-5">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-[#222] flex items-center justify-center text-xs font-bold text-[#E8B931]">
+                        {char.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-[#F5F5F0]">{char.name}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-[#E8B931] tracking-widest uppercase border border-[#E8B931]/30 px-1.5 py-0.5">
+                            {char.role}
+                          </span>
+                          <span className="text-[10px] text-[#555]">
+                            {char.bookTitle}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-[#E8B931]">{char.appearances}</div>
-                    <div className="text-[10px] text-[#555]">Pages</div>
+
+                  {/* Details */}
+                  {char.description && (
+                    <p className="text-xs text-[#888] mb-3">{char.description}</p>
+                  )}
+
+                  {/* Appearance & Personality */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    {char.appearance && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Appearance</div>
+                        <p className="text-[#999]">{char.appearance}</p>
+                      </div>
+                    )}
+                    {char.personality && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Personality</div>
+                        <p className="text-[#999]">{char.personality}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* Attributes */}
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {char.attributes.map((attr) => (
-                    <span
-                      key={attr}
-                      className="text-[10px] text-[#999] bg-[#0A0A0A] border border-[#222] px-2 py-1 tracking-wide"
-                    >
-                      {attr}
-                    </span>
-                  ))}
-                </div>
-
-                {/* Footer */}
-                <div className="flex items-center justify-between pt-3 border-t border-[#222]">
-                  <span className="text-[10px] text-[#555]">
-                    Last seen: {char.lastSeen}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-[#555] uppercase tracking-wider flex items-center gap-1">
-                      Tracked <div className="w-1.5 h-1.5 bg-[#E8B931] rounded-full" />
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-[#555]">
+              <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">{searchQuery ? "No characters found" : "No characters yet"}</p>
+            </div>
+          )}
         </div>
       )}
 
-      {activeTab === "visual" && (
+      {!loadingMemory && activeTab === "visual" && (
         <div className="space-y-6">
-          {/* Art styles per comic */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[
-              {
-                title: "The Last Cyberpunk",
-                style: "Noir-Cyberpunk",
-                palette: ["#0D0D0D", "#1A1A2E", "#E8B931", "#C73E1D", "#4A4A6A"],
-                panels: 24,
-                locked: true,
-              },
-              {
-                title: "Shadow Walker Chronicles",
-                style: "Dark Fantasy",
-                palette: ["#0A0A0A", "#1C1C2E", "#7B68EE", "#2F4F4F", "#8B4513"],
-                panels: 18,
-                locked: true,
-              },
-              {
-                title: "Neon Dreams",
-                style: "Synthwave Pop",
-                palette: ["#0A0A0A", "#FF006E", "#00F5FF", "#FEE440", "#8338EC"],
-                panels: 8,
-                locked: false,
-              },
-              {
-                title: "Iron Legacy",
-                style: "Military Realism",
-                palette: ["#1A1A1A", "#3B3B3B", "#8B7355", "#556B2F", "#B8860B"],
-                panels: 16,
-                locked: true,
-              },
-            ].map((comic) => (
-              <div key={comic.title} className="bg-[#111] border border-[#222] p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <div className="text-sm font-bold text-[#F5F5F0]">{comic.title}</div>
-                    <div className="text-[10px] text-[#E8B931] tracking-widest uppercase mt-0.5">
-                      {comic.style}
+          {/* Visual styles per comic */}
+          {visualStyles.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {visualStyles.map((style) => (
+                <div key={style.id} className="bg-[#111] border border-[#222] p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <div className="text-sm font-bold text-[#F5F5F0]">{style.bookTitle}</div>
+                      <div className="text-[10px] text-[#E8B931] tracking-widest uppercase mt-0.5">
+                        {style.artStyle}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] tracking-widest uppercase border px-1.5 py-0.5 ${
-                      comic.locked ? "border-[#E8B931]/30 text-[#E8B931]" : "border-[#555] text-[#555]"
-                    }`}>
-                      {comic.locked ? "Locked" : "Draft"}
-                    </span>
-                  </div>
-                </div>
 
-                {/* Color palette */}
-                <div className="flex gap-2 mb-3">
-                  {comic.palette.map((color, i) => (
-                    <div key={i} className="flex-1">
-                      <div
-                        className="w-full h-8 border border-[#333]"
-                        style={{ backgroundColor: color }}
-                      />
-                      <div className="text-[8px] text-[#555] text-center mt-1 font-mono">{color}</div>
+                  {/* Style details */}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <div className="bg-[#0A0A0A] border border-[#222] p-2">
+                      <div className="text-[9px] text-[#555] uppercase tracking-wider">Color Palette</div>
+                      <div className="text-xs text-[#F5F5F0] mt-1">{style.colorPalette}</div>
                     </div>
-                  ))}
-                </div>
+                    <div className="bg-[#0A0A0A] border border-[#222] p-2">
+                      <div className="text-[9px] text-[#555] uppercase tracking-wider">Panel Density</div>
+                      <div className="text-xs text-[#F5F5F0] mt-1">{style.panelDensity}</div>
+                    </div>
+                    <div className="bg-[#0A0A0A] border border-[#222] p-2">
+                      <div className="text-[9px] text-[#555] uppercase tracking-wider">Speech Bubbles</div>
+                      <div className="text-xs text-[#F5F5F0] mt-1">{style.speechBubbleStyle}</div>
+                    </div>
+                    <div className="bg-[#0A0A0A] border border-[#222] p-2">
+                      <div className="text-[9px] text-[#555] uppercase tracking-wider">Detail Level</div>
+                      <div className="text-xs text-[#F5F5F0] mt-1">{style.detailLevel}</div>
+                    </div>
+                  </div>
 
-                <div className="text-[10px] text-[#555]">
-                  {comic.panels} panels referenced
+                  {style.referenceNotes && (
+                    <div className="text-[10px] text-[#666] border-t border-[#222] pt-3">
+                      <span className="text-[#555] uppercase tracking-wider">Notes: </span>
+                      {style.referenceNotes}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-[#555]">
+              <Palette className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No visual styles yet</p>
+            </div>
+          )}
         </div>
       )}
 
-      {activeTab === "panels" && (
+      {!loadingMemory && activeTab === "panels" && (
         <div className="space-y-6">
           {/* Layout templates */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { name: "Standard 3-Panel", uses: 42, comic: "The Last Cyberpunk" },
-              { name: "Action Splash", uses: 28, comic: "Shadow Walker" },
-              { name: "Dialogue 2-Panel", uses: 35, comic: "The Last Cyberpunk" },
-              { name: "Wide Establishing", uses: 18, comic: "Neon Dreams" },
-              { name: "Grid 6-Panel", uses: 22, comic: "Iron Legacy" },
-              { name: "Vertical Stack", uses: 15, comic: "Shadow Walker" },
-              { name: "Asymmetric Split", uses: 12, comic: "Neon Dreams" },
-              { name: "Double Splash", uses: 8, comic: "The Last Cyberpunk" },
-              { name: "Inset Overlay", uses: 10, comic: "Iron Legacy" },
-            ].map((layout) => (
-              <div key={layout.name} className="bg-[#111] border border-[#222] p-4">
-                {/* Mini layout preview */}
-                <div className="h-24 bg-[#0A0A0A] border border-[#222] mb-3 flex items-center justify-center p-3">
-                  <div className="w-full h-full grid grid-cols-3 gap-1">
-                    <div className="bg-[#222]/60 col-span-2" />
-                    <div className="bg-[#222]/60" />
-                    <div className="bg-[#222]/60" />
-                    <div className="bg-[#222]/60" />
+          {panelLayouts.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {panelLayouts.slice(0, 20).map((layout) => (
+                <div key={layout.id} className="bg-[#111] border border-[#222] p-4">
+                  {/* Mini layout preview */}
+                  <div className="h-20 bg-[#0A0A0A] border border-[#222] mb-3 flex items-center justify-center p-3">
+                    <div className="w-full h-full grid grid-cols-3 gap-1">
+                      <div className="bg-[#222]/60 col-span-2" />
+                      <div className="bg-[#222]/60" />
+                      <div className="bg-[#222]/60" />
+                      <div className="bg-[#222]/60" />
+                    </div>
+                  </div>
+                  <div className="text-sm font-bold text-[#F5F5F0]">Page {layout.pageNumber}: {layout.title}</div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-[10px] text-[#555]">{layout.bookTitle}</span>
+                    <span className="text-[10px] text-[#E8B931]">Ch. {layout.chapterNumber || 1}</span>
+                  </div>
+                  {layout.description && (
+                    <p className="text-[10px] text-[#666] mt-2 line-clamp-2">{layout.description}</p>
+                  )}
+                  {layout.keyEvents && layout.keyEvents.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {layout.keyEvents.slice(0, 3).map((event, i) => (
+                        <span key={i} className="text-[8px] text-[#888] bg-[#0A0A0A] border border-[#222] px-1.5 py-0.5">
+                          {event}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-[#555]">
+              <Layers className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No panel layouts yet</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!loadingMemory && activeTab === "world" && (
+        <div className="space-y-4">
+          {/* Search */}
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#555]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search worlds by project or setting..."
+              className="w-full pl-10 pr-4 py-3 bg-[#111] border border-[#222] text-sm text-[#F5F5F0] placeholder:text-[#444] focus:border-[#E8B931] focus:outline-none"
+            />
+          </div>
+
+          {/* World info list */}
+          {filteredWorlds.length > 0 ? (
+            <div className="space-y-4">
+              {filteredWorlds.map((world) => (
+                <div key={world.id} className="bg-[#111] border border-[#222] p-5">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-[#222] flex items-center justify-center">
+                      <Globe className="w-5 h-5 text-[#E8B931]" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-[#F5F5F0]">{world.bookTitle}</div>
+                      <div className="text-[10px] text-[#E8B931] tracking-widest uppercase">
+                        World Settings
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* World details grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {world.setting && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Setting</div>
+                        <p className="text-xs text-[#999]">{world.setting}</p>
+                      </div>
+                    )}
+                    {world.timePeriod && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Time Period</div>
+                        <p className="text-xs text-[#999]">{world.timePeriod}</p>
+                      </div>
+                    )}
+                    {world.atmosphere && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Atmosphere</div>
+                        <p className="text-xs text-[#999]">{world.atmosphere}</p>
+                      </div>
+                    )}
+                    {world.technology && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Technology</div>
+                        <p className="text-xs text-[#999]">{world.technology}</p>
+                      </div>
+                    )}
+                    {world.keyLocations && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3 md:col-span-2">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">Key Locations</div>
+                        <p className="text-xs text-[#999]">{world.keyLocations}</p>
+                      </div>
+                    )}
+                    {world.rules && (
+                      <div className="bg-[#0A0A0A] border border-[#222] p-3 md:col-span-2">
+                        <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-1">World Rules</div>
+                        <p className="text-xs text-[#999]">{world.rules}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="text-sm font-bold text-[#F5F5F0]">{layout.name}</div>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-[10px] text-[#555]">{layout.comic}</span>
-                  <span className="text-[10px] text-[#E8B931]">{layout.uses} uses</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-[#555]">
+              <Globe className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">{searchQuery ? "No worlds found" : "No world info yet"}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
