@@ -172,7 +172,7 @@ async function generatePdfBytes(
           font: font,
           color: rgb(0.3, 0.3, 0.3),
         });
-        synopsisY -= 14;
+        synopsisY -= 18; // Increased line spacing
       });
     }
 
@@ -228,7 +228,7 @@ async function generatePdfBytes(
         color: rgb(0.4, 0.4, 0.4),
       });
 
-      tocY -= 18;
+      tocY -= 22; // Increased TOC entry spacing
     });
   }
 
@@ -296,9 +296,9 @@ async function generatePdfBytes(
           font: font,
           color: rgb(0.3, 0.3, 0.3),
         });
-        yPos -= 12;
+        yPos -= 16; // Increased line spacing
       });
-      yPos -= 10;
+      yPos -= 15; // Extra gap after script section
     }
 
     // Panels header
@@ -342,7 +342,7 @@ async function generatePdfBytes(
           font: font,
           color: rgb(0.3, 0.3, 0.3),
         });
-        yPos -= 12;
+        yPos -= 16; // Increased line spacing
       });
 
       // Camera and mood
@@ -359,7 +359,7 @@ async function generatePdfBytes(
           font: fontOblique,
           color: rgb(0.5, 0.5, 0.5),
         });
-        yPos -= 14;
+        yPos -= 18; // Increased spacing
       }
 
       // Dialogue
@@ -389,17 +389,17 @@ async function generatePdfBytes(
           dialogueLines.forEach((line, idx) => {
             contentPage.drawText(line, {
               x: margin + 15 + prefixWidth,
-              y: yPos - idx * 10,
+              y: yPos - idx * 14, // Increased line spacing for dialogue
               size: 8,
               font: font,
               color: rgb(0.3, 0.3, 0.3),
             });
           });
-          yPos -= dialogueLines.length * 10 + 6;
+          yPos -= dialogueLines.length * 14 + 10; // Increased spacing after dialogue block
         }
       }
 
-      yPos += 8;
+      yPos += 12; // Increased gap between panels
     }
 
     // Footer
