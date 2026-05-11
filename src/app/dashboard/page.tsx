@@ -19,6 +19,8 @@ import {
   Settings2,
   Type,
   Check,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────
@@ -147,6 +149,7 @@ export default function DashboardPage() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<string>("pdf");
   const [exporting, setExporting] = useState(false);
+  const [expandedPage, setExpandedPage] = useState<string | null>(null);
   const [pdfSettings, setPdfSettings] = useState({
     font: "helvetica",
     fontSize: 10,
@@ -180,7 +183,6 @@ export default function DashboardPage() {
     if (project.status === "complete" || project.pages > 0) {
       await openPreview(project.id);
     }
-    // For in-progress projects, navigate to workspace (handled by Link)
   };
 
   // Open preview modal
@@ -188,6 +190,7 @@ export default function DashboardPage() {
     try {
       setLoadingPreview(true);
       setShowPreview(true);
+      setExpandedPage(null);
       const res = await fetch(`/api/engine/project/${projectId}`);
       const data = await res.json();
       if (data.success) {
@@ -209,6 +212,7 @@ export default function DashboardPage() {
     setShowPreview(false);
     setPreviewProject(null);
     setSelectedFormat("pdf");
+    setExpandedPage(null);
   };
 
   // Handle export from preview
@@ -248,20 +252,37 @@ export default function DashboardPage() {
         }),
       });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Export failed");
-      }
+      const contentType = res.headers.get("content-type") || "";
 
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      // Handle JSON response (Cloudinary URL)
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.error || "Export failed");
+        }
+        
+        // Open Cloudinary URL in new tab or download
+        if (data.data?.url) {
+          const a = document.createElement("a");
+          a.href = data.data.url;
+          a.download = filename;
+          a.target = "_blank";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+      } else {
+        // Fallback: handle blob response
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
 
       closePreview();
     } catch (err: any) {
@@ -305,6 +326,11 @@ export default function DashboardPage() {
   const getApprovedPagesCount = () => {
     if (!previewProject?.pages) return 0;
     return previewProject.pages.filter((p) => p.status === "approved").length;
+  };
+
+  // Toggle page expansion
+  const togglePageExpand = (pageId: string) => {
+    setExpandedPage(expandedPage === pageId ? null : pageId);
   };
 
   return (
@@ -545,7 +571,7 @@ export default function DashboardPage() {
       {/* Preview Modal */}
       {showPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="bg-[#0A0A0A] border border-[#222] w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-[#0A0A0A] border border-[#222] w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b border-[#222]">
               <div className="flex items-center gap-3">
@@ -575,36 +601,120 @@ export default function DashboardPage() {
                 </div>
               ) : previewProject ? (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Page Grid */}
-                  <div className="lg:col-span-2">
+                  {/* Page List with Content */}
+                  <div className="lg:col-span-2 space-y-3">
                     <h4 className="text-xs font-bold text-[#E8B931] tracking-[0.15em] uppercase mb-4">
-                      All Pages
+                      All Pages (Click to expand)
                     </h4>
-                    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {previewProject.pages
-                        ?.filter((p) => p.status === "approved")
-                        .sort((a, b) => a.number - b.number)
-                        .map((page) => (
+                    
+                    {previewProject.pages
+                      ?.filter((p) => p.status === "approved")
+                      .sort((a, b) => a.number - b.number)
+                      .map((page) => {
+                        const isExpanded = expandedPage === page.id;
+                        return (
                           <div
                             key={page.id}
-                            className="bg-[#111] border border-[#222] p-2"
+                            className="bg-[#111] border border-[#222] overflow-hidden"
                           >
-                            <div className="aspect-[3/4] bg-[#1A1A1A] border border-[#222] mb-2 flex items-center justify-center">
-                              <div className="text-center">
-                                <div className="text-lg font-bold text-[#E8B931]">
+                            {/* Page Header - Clickable */}
+                            <button
+                              onClick={() => togglePageExpand(page.id)}
+                              className="w-full p-4 flex items-center justify-between hover:bg-[#1A1A1A] transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-[#E8B931]/10 text-[#E8B931] text-sm font-bold flex items-center justify-center">
                                   {page.number}
                                 </div>
-                                <div className="text-[8px] text-[#555] uppercase">
-                                  {page.panels?.length || 0} panels
+                                <div className="text-left">
+                                  <div className="text-sm font-bold text-[#F5F5F0]">
+                                    {page.title}
+                                  </div>
+                                  <div className="text-[10px] text-[#555]">
+                                    {page.panels?.length || 0} panels
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <div className="text-[10px] font-bold text-[#F5F5F0] truncate">
-                              {page.title}
-                            </div>
+                              {isExpanded ? (
+                                <ChevronUp className="w-4 h-4 text-[#666]" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4 text-[#666]" />
+                              )}
+                            </button>
+
+                            {/* Expanded Content */}
+                            {isExpanded && (
+                              <div className="px-4 pb-4 border-t border-[#222] pt-4">
+                                {/* Script */}
+                                {page.script && (
+                                  <div className="mb-4">
+                                    <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
+                                      Script Summary
+                                    </div>
+                                    <p className="text-xs text-[#999] leading-relaxed">
+                                      {page.script}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {/* Panels */}
+                                {page.panels && page.panels.length > 0 && (
+                                  <div className="space-y-4">
+                                    <div className="text-[10px] text-[#E8B931] uppercase tracking-wider mb-2">
+                                      Panels
+                                    </div>
+                                    {page.panels.map((panel, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="bg-[#0A0A0A] border border-[#222] p-3"
+                                      >
+                                        <div className="flex items-center justify-between mb-2">
+                                          <span className="text-xs font-bold text-[#F5F5F0]">
+                                            Panel {panel.panelNumber || idx + 1}
+                                          </span>
+                                          <div className="flex items-center gap-2">
+                                            {panel.cameraAngle && (
+                                              <span className="text-[9px] text-[#555] bg-[#1A1A1A] px-2 py-0.5">
+                                                {panel.cameraAngle}
+                                              </span>
+                                            )}
+                                            {panel.mood && (
+                                              <span className="text-[9px] text-[#555] bg-[#1A1A1A] px-2 py-0.5">
+                                                {panel.mood}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Description */}
+                                        <p className="text-[11px] text-[#888] mb-2">
+                                          {panel.description}
+                                        </p>
+
+                                        {/* Dialogue */}
+                                        {panel.dialogue && panel.dialogue.length > 0 && (
+                                          <div className="space-y-2 mt-3 border-t border-[#222] pt-3">
+                                            {panel.dialogue.map((d, di) => (
+                                              <div key={di} className="text-[11px]">
+                                                <span className="text-[#E8B931] font-bold">
+                                                  {d.type === "narration" ? "NARRATOR" : d.character}:
+                                                </span>{" "}
+                                                <span className="text-[#999] italic">
+                                                  "{d.text}"
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
-                        ))}
-                    </div>
+                        );
+                      })}
                   </div>
 
                   {/* Export Options */}

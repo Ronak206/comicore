@@ -1,27 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { v2 as cloudinary } from "cloudinary";
+
+// Configure Cloudinary from URL
+const CLOUDINARY_URL = process.env.CLOUDINARY_URL || "";
+if (CLOUDINARY_URL) {
+  cloudinary.config({
+    secure: true,
+  });
+}
+
+/**
+ * Sanitize text for WinAnsi encoding (pdf-lib standard fonts)
+ * Removes characters that can't be encoded
+ */
+function sanitizeForPdf(text: string): string {
+  if (!text) return "";
+  
+  return text
+    // Replace newlines with spaces
+    .replace(/[\r\n]+/g, " ")
+    // Replace various dashes with simple dash
+    .replace(/[—–−]/g, "-")
+    // Replace smart quotes with simple quotes
+    .replace(/[""'']/g, '"')
+    // Replace ellipsis
+    .replace(/…/g, "...")
+    // Remove other non-ASCII characters
+    .replace(/[^\x00-\x7F]/g, "")
+    // Replace multiple spaces with single space
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /**
  * POST /api/export/pdf
  *
- * Exports a comic project as PDF
- *
- * Request Body:
- * {
- *   "sessionId": string,        // Project ID (required)
- *   "options": {                // Optional PDF settings
- *     "title": string,
- *     "pageSize": "a4" | "letter" | "comic",
- *     "orientation": "portrait" | "landscape",
- *     "includeCover": boolean,
- *     "quality": "web" | "print" | "high",
- *     "metadata": {
- *       "author": string,
- *       "publisher": string
- *     }
- *   }
- * }
+ * Exports a comic project as PDF and uploads to Cloudinary
  */
 export async function POST(request: NextRequest) {
   try {
@@ -45,7 +61,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if project has approved pages
-    const approvedPages = project.pages.filter(p => p.status === "approved");
+    const approvedPages = project.pages.filter((p: any) => p.status === "approved");
 
     if (approvedPages.length === 0) {
       return NextResponse.json(
@@ -54,16 +70,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const title = body.options?.title || project.title;
-    const author = body.options?.metadata?.author || "Comicore AI";
+    const title = sanitizeForPdf(body.options?.title || project.title);
+    const author = sanitizeForPdf(body.options?.metadata?.author || "Comicore AI");
+    const fontId = body.options?.font || "helvetica";
 
     // Create PDF document
     const pdfDoc = await PDFDocument.create();
-    
-    // Embed fonts
-    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const helveticaOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+
+    // Embed fonts based on selection
+    let font: any;
+    let fontBold: any;
+    let fontOblique: any;
+
+    switch (fontId) {
+      case "times":
+        font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+        fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+        fontOblique = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+        break;
+      case "courier":
+        font = await pdfDoc.embedFont(StandardFonts.Courier);
+        fontBold = await pdfDoc.embedFont(StandardFonts.CourierBold);
+        fontOblique = await pdfDoc.embedFont(StandardFonts.CourierOblique);
+        break;
+      default:
+        font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        fontOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+    }
 
     // Page dimensions (A4)
     const pageWidth = 595.28;
@@ -76,14 +110,15 @@ export async function POST(request: NextRequest) {
 
     // Helper to wrap text
     const wrapText = (text: string, maxWidth: number, font: any, fontSize: number): string[] => {
-      const words = text.split(' ');
+      const sanitized = sanitizeForPdf(text);
+      const words = sanitized.split(" ");
       const lines: string[] = [];
-      let currentLine = '';
+      let currentLine = "";
 
       for (const word of words) {
         const testLine = currentLine ? `${currentLine} ${word}` : word;
         const width = font.widthOfTextAtSize(testLine, fontSize);
-        
+
         if (width <= maxWidth) {
           currentLine = testLine;
         } else {
@@ -95,124 +130,140 @@ export async function POST(request: NextRequest) {
       return lines;
     };
 
-    // === COVER PAGE ===
-    const coverPage = addPage();
-    
-    // Title
-    const titleSize = 28;
-    const titleWidth = helveticaBold.widthOfTextAtSize(title, titleSize);
-    coverPage.drawText(title, {
-      x: (pageWidth - titleWidth) / 2,
-      y: pageHeight - 200,
-      size: titleSize,
-      font: helveticaBold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-
-    // Genre
-    const genreText = `A ${project.genre} Comic`;
-    const genreSize = 14;
-    const genreWidth = helvetica.widthOfTextAtSize(genreText, genreSize);
-    coverPage.drawText(genreText, {
-      x: (pageWidth - genreWidth) / 2,
-      y: pageHeight - 240,
-      size: genreSize,
-      font: helveticaOblique,
-      color: rgb(0.4, 0.4, 0.4),
-    });
-
-    // Author
-    const authorText = `By ${author}`;
-    const authorWidth = helvetica.widthOfTextAtSize(authorText, 12);
-    coverPage.drawText(authorText, {
-      x: (pageWidth - authorWidth) / 2,
-      y: pageHeight - 280,
-      size: 12,
-      font: helvetica,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-
-    // Page count
-    const pageCountText = `${approvedPages.length} Pages`;
-    const pageCountWidth = helvetica.widthOfTextAtSize(pageCountText, 12);
-    coverPage.drawText(pageCountText, {
-      x: (pageWidth - pageCountWidth) / 2,
-      y: pageHeight - 310,
-      size: 12,
-      font: helvetica,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-
-    // Synopsis (if available)
-    if (project.synopsis) {
-      const synopsisLines = wrapText(project.synopsis, contentWidth - 40, helvetica, 10);
-      let synopsisY = pageHeight - 380;
-      
-      synopsisLines.slice(0, 10).forEach((line) => {
-        const lineWidth = helvetica.widthOfTextAtSize(line, 10);
-        coverPage.drawText(line, {
-          x: (pageWidth - lineWidth) / 2,
-          y: synopsisY,
-          size: 10,
-          font: helvetica,
-          color: rgb(0.3, 0.3, 0.3),
-        });
-        synopsisY -= 14;
-      });
-    }
-
-    // Generation info at bottom
-    const genText = `Generated with Comicore AI on ${new Date().toLocaleDateString()}`;
-    const genWidth = helvetica.widthOfTextAtSize(genText, 8);
-    coverPage.drawText(genText, {
-      x: (pageWidth - genWidth) / 2,
-      y: 50,
-      size: 8,
-      font: helvetica,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-
-    // === TABLE OF CONTENTS ===
-    const tocPage = addPage();
-    
-    // TOC Title
-    const tocTitle = "Table of Contents";
-    tocPage.drawText(tocTitle, {
-      x: margin,
-      y: pageHeight - 80,
-      size: 18,
-      font: helveticaBold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-
-    // TOC entries
-    let tocY = pageHeight - 120;
-    approvedPages.forEach((page, index) => {
-      if (tocY < 80) {
-        const newTocPage = addPage();
-        tocY = pageHeight - 80;
+    // Helper to draw text safely
+    const drawTextSafe = (page: any, text: string, options: any) => {
+      const sanitized = sanitizeForPdf(text);
+      if (sanitized) {
+        page.drawText(sanitized, { ...options, font: options.font || font });
       }
-      
-      const entryTitle = `${page.number}. ${page.title}`;
-      tocPage.drawText(entryTitle, {
-        x: margin,
-        y: tocY,
-        size: 10,
-        font: helvetica,
-        color: rgb(0.2, 0.2, 0.2),
+    };
+
+    const includeCover = body.options?.includeCover !== false;
+    const includeToc = body.options?.includeToc !== false;
+    const includePageNumbers = body.options?.includePageNumbers !== false;
+
+    // === COVER PAGE ===
+    if (includeCover) {
+      const coverPage = addPage();
+
+      // Title
+      const titleSize = 28;
+      const titleWidth = fontBold.widthOfTextAtSize(title, titleSize);
+      coverPage.drawText(title, {
+        x: (pageWidth - titleWidth) / 2,
+        y: pageHeight - 200,
+        size: titleSize,
+        font: fontBold,
+        color: rgb(0.1, 0.1, 0.1),
       });
 
-      const pageNum = `Page ${index + 1}`;
-      tocPage.drawText(pageNum, {
-        x: pageWidth - margin - helvetica.widthOfTextAtSize(pageNum, 10),
-        y: tocY,
-        size: 10,
-        font: helvetica,
+      // Genre
+      const genreText = sanitizeForPdf(`A ${project.genre} Comic`);
+      const genreSize = 14;
+      const genreWidth = font.widthOfTextAtSize(genreText, genreSize);
+      coverPage.drawText(genreText, {
+        x: (pageWidth - genreWidth) / 2,
+        y: pageHeight - 240,
+        size: genreSize,
+        font: fontOblique,
         color: rgb(0.4, 0.4, 0.4),
       });
 
-      tocY -= 18;
-    });
+      // Author
+      const authorText = sanitizeForPdf(`By ${author}`);
+      const authorWidth = font.widthOfTextAtSize(authorText, 12);
+      coverPage.drawText(authorText, {
+        x: (pageWidth - authorWidth) / 2,
+        y: pageHeight - 280,
+        size: 12,
+        font: font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+
+      // Page count
+      const pageCountText = `${approvedPages.length} Pages`;
+      const pageCountWidth = font.widthOfTextAtSize(pageCountText, 12);
+      coverPage.drawText(pageCountText, {
+        x: (pageWidth - pageCountWidth) / 2,
+        y: pageHeight - 310,
+        size: 12,
+        font: font,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+
+      // Synopsis (if available)
+      if (project.synopsis) {
+        const synopsisLines = wrapText(project.synopsis, contentWidth - 40, font, 10);
+        let synopsisY = pageHeight - 380;
+
+        synopsisLines.slice(0, 10).forEach((line) => {
+          const lineWidth = font.widthOfTextAtSize(line, 10);
+          coverPage.drawText(line, {
+            x: (pageWidth - lineWidth) / 2,
+            y: synopsisY,
+            size: 10,
+            font: font,
+            color: rgb(0.3, 0.3, 0.3),
+          });
+          synopsisY -= 14;
+        });
+      }
+
+      // Generation info at bottom
+      const genText = sanitizeForPdf(`Generated with Comicore AI on ${new Date().toLocaleDateString()}`);
+      const genWidth = font.widthOfTextAtSize(genText, 8);
+      coverPage.drawText(genText, {
+        x: (pageWidth - genWidth) / 2,
+        y: 50,
+        size: 8,
+        font: font,
+        color: rgb(0.6, 0.6, 0.6),
+      });
+    }
+
+    // === TABLE OF CONTENTS ===
+    if (includeToc) {
+      const tocPage = addPage();
+
+      // TOC Title
+      const tocTitle = "Table of Contents";
+      tocPage.drawText(tocTitle, {
+        x: margin,
+        y: pageHeight - 80,
+        size: 18,
+        font: fontBold,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+
+      // TOC entries
+      let tocY = pageHeight - 120;
+      approvedPages.forEach((page: any, index: number) => {
+        if (tocY < 80) {
+          const newTocPage = addPage();
+          tocY = pageHeight - 80;
+        }
+
+        const entryTitle = sanitizeForPdf(`${page.number}. ${page.title}`);
+        tocPage.drawText(entryTitle, {
+          x: margin,
+          y: tocY,
+          size: 10,
+          font: font,
+          color: rgb(0.2, 0.2, 0.2),
+        });
+
+        const pageNum = `Page ${index + 1}`;
+        tocPage.drawText(pageNum, {
+          x: pageWidth - margin - font.widthOfTextAtSize(pageNum, 10),
+          y: tocY,
+          size: 10,
+          font: font,
+          color: rgb(0.4, 0.4, 0.4),
+        });
+
+        tocY -= 18;
+      });
+    }
 
     // === CONTENT PAGES ===
     for (let pageIndex = 0; pageIndex < approvedPages.length; pageIndex++) {
@@ -222,44 +273,46 @@ export async function POST(request: NextRequest) {
       let yPos = pageHeight - 80;
 
       // Page header
-      const headerText = `${title} - Page ${pageIndex + 1}`;
-      contentPage.drawText(headerText, {
-        x: margin,
-        y: pageHeight - 40,
-        size: 8,
-        font: helvetica,
-        color: rgb(0.6, 0.6, 0.6),
-      });
+      if (includePageNumbers) {
+        const headerText = sanitizeForPdf(`${title} - Page ${pageIndex + 1}`);
+        contentPage.drawText(headerText, {
+          x: margin,
+          y: pageHeight - 40,
+          size: 8,
+          font: font,
+          color: rgb(0.6, 0.6, 0.6),
+        });
 
-      // Page number on right
-      const pageNumText = String(pageIndex + 1);
-      contentPage.drawText(pageNumText, {
-        x: pageWidth - margin - helvetica.widthOfTextAtSize(pageNumText, 8),
-        y: pageHeight - 40,
-        size: 8,
-        font: helvetica,
-        color: rgb(0.6, 0.6, 0.6),
-      });
+        // Page number on right
+        const pageNumText = String(pageIndex + 1);
+        contentPage.drawText(pageNumText, {
+          x: pageWidth - margin - font.widthOfTextAtSize(pageNumText, 8),
+          y: pageHeight - 40,
+          size: 8,
+          font: font,
+          color: rgb(0.6, 0.6, 0.6),
+        });
+      }
 
       // Page title
-      contentPage.drawText(page.title, {
+      contentPage.drawText(sanitizeForPdf(page.title), {
         x: margin,
         y: yPos,
         size: 16,
-        font: helveticaBold,
+        font: fontBold,
         color: rgb(0.1, 0.1, 0.1),
       });
       yPos -= 25;
 
       // Chapter info if available
-      const pageIndexItem = project.pageIndex.find(p => p.pageNumber === page.number);
+      const pageIndexItem = project.pageIndex?.find((p: any) => p.pageNumber === page.number);
       if (pageIndexItem?.chapterTitle) {
-        const chapterText = `Chapter ${pageIndexItem.chapterNumber}: ${pageIndexItem.chapterTitle}`;
+        const chapterText = sanitizeForPdf(`Chapter ${pageIndexItem.chapterNumber}: ${pageIndexItem.chapterTitle}`);
         contentPage.drawText(chapterText, {
           x: margin,
           y: yPos,
           size: 10,
-          font: helveticaOblique,
+          font: fontOblique,
           color: rgb(0.4, 0.4, 0.4),
         });
         yPos -= 20;
@@ -267,13 +320,13 @@ export async function POST(request: NextRequest) {
 
       // Script preview
       if (page.script) {
-        const scriptLines = wrapText(page.script, contentWidth, helvetica, 9);
+        const scriptLines = wrapText(page.script, contentWidth, font, 9);
         scriptLines.slice(0, 3).forEach((line) => {
           contentPage.drawText(line, {
             x: margin,
             y: yPos,
             size: 9,
-            font: helvetica,
+            font: font,
             color: rgb(0.3, 0.3, 0.3),
           });
           yPos -= 12;
@@ -286,7 +339,7 @@ export async function POST(request: NextRequest) {
         x: margin,
         y: yPos,
         size: 12,
-        font: helveticaBold,
+        font: fontBold,
         color: rgb(0.1, 0.1, 0.1),
       });
       yPos -= 18;
@@ -294,7 +347,7 @@ export async function POST(request: NextRequest) {
       // Panel content
       for (let panelIndex = 0; panelIndex < page.panels.length; panelIndex++) {
         const panel = page.panels[panelIndex];
-        
+
         // Check if we need a new page
         if (yPos < 150) {
           const newContentPage = addPage();
@@ -307,19 +360,19 @@ export async function POST(request: NextRequest) {
           x: margin,
           y: yPos,
           size: 10,
-          font: helveticaBold,
+          font: fontBold,
           color: rgb(0.2, 0.2, 0.2),
         });
         yPos -= 14;
 
         // Panel description
-        const descLines = wrapText(panel.description, contentWidth - 10, helvetica, 9);
+        const descLines = wrapText(panel.description, contentWidth - 10, font, 9);
         descLines.slice(0, 4).forEach((line) => {
           contentPage.drawText(line, {
             x: margin + 10,
             y: yPos,
             size: 9,
-            font: helvetica,
+            font: font,
             color: rgb(0.3, 0.3, 0.3),
           });
           yPos -= 12;
@@ -327,12 +380,16 @@ export async function POST(request: NextRequest) {
 
         // Camera and mood
         if (panel.cameraAngle || panel.mood) {
-          const meta = [panel.cameraAngle && `Camera: ${panel.cameraAngle}`, panel.mood && `Mood: ${panel.mood}`].filter(Boolean).join(" | ");
+          const meta = sanitizeForPdf(
+            [panel.cameraAngle && `Camera: ${panel.cameraAngle}`, panel.mood && `Mood: ${panel.mood}`]
+              .filter(Boolean)
+              .join(" | ")
+          );
           contentPage.drawText(meta, {
             x: margin + 10,
             y: yPos,
             size: 8,
-            font: helveticaOblique,
+            font: fontOblique,
             color: rgb(0.5, 0.5, 0.5),
           });
           yPos -= 14;
@@ -346,28 +403,28 @@ export async function POST(request: NextRequest) {
               yPos = pageHeight - 80;
             }
 
-            const prefix = d.type === "narration" ? `[${d.character}]` : `${d.character}:`;
-            const dialogueText = d.type === "sfx" ? `*${d.text}*` : d.text;
-            
+            const prefix = sanitizeForPdf(d.type === "narration" ? `[${d.character}]` : `${d.character}:`);
+            const dialogueText = sanitizeForPdf(d.type === "sfx" ? `*${d.text}*` : d.text);
+
             // Character name
             contentPage.drawText(prefix, {
               x: margin + 10,
               y: yPos,
               size: 8,
-              font: helveticaBold,
+              font: fontBold,
               color: rgb(0.2, 0.2, 0.2),
             });
 
             // Dialogue text
-            const dialogueLines = wrapText(dialogueText, contentWidth - 50, helvetica, 8);
-            const prefixWidth = helveticaBold.widthOfTextAtSize(prefix, 8);
-            
+            const dialogueLines = wrapText(dialogueText, contentWidth - 50, font, 8);
+            const prefixWidth = fontBold.widthOfTextAtSize(prefix, 8);
+
             dialogueLines.forEach((line, idx) => {
               contentPage.drawText(line, {
                 x: margin + 15 + prefixWidth,
-                y: yPos - (idx * 10),
+                y: yPos - idx * 10,
                 size: 8,
-                font: helvetica,
+                font: font,
                 color: rgb(0.3, 0.3, 0.3),
               });
             });
@@ -379,13 +436,13 @@ export async function POST(request: NextRequest) {
       }
 
       // Footer
-      const footerText = `Comicore AI | ${title}`;
-      const footerWidth = helvetica.widthOfTextAtSize(footerText, 7);
+      const footerText = sanitizeForPdf(`Comicore AI | ${title}`);
+      const footerWidth = font.widthOfTextAtSize(footerText, 7);
       contentPage.drawText(footerText, {
         x: (pageWidth - footerWidth) / 2,
         y: 30,
         size: 7,
-        font: helvetica,
+        font: font,
         color: rgb(0.7, 0.7, 0.7),
       });
     }
@@ -393,21 +450,49 @@ export async function POST(request: NextRequest) {
     // Set PDF metadata
     pdfDoc.setTitle(title);
     pdfDoc.setAuthor(author);
-    pdfDoc.setSubject(`${project.genre} Comic`);
-    pdfDoc.setKeywords(['comic', 'comicore', project.genre]);
-    pdfDoc.setProducer('Comicore AI');
-    pdfDoc.setCreator('Comicore AI');
+    pdfDoc.setSubject(sanitizeForPdf(`${project.genre} Comic`));
+    pdfDoc.setKeywords(["comic", "comicore", sanitizeForPdf(project.genre)]);
+    pdfDoc.setProducer("Comicore AI");
+    pdfDoc.setCreator("Comicore AI");
 
     // Generate PDF bytes
     const pdfBytes = await pdfDoc.save();
 
-    // Return the PDF file
-    return new NextResponse(pdfBytes, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${title.replace(/\s+/g, "-").toLowerCase()}.pdf"`,
-        "Content-Length": pdfBytes.length.toString(),
+    // Upload to Cloudinary
+    const fileName = `${title.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}`;
+    const base64Pdf = `data:application/pdf;base64,${Buffer.from(pdfBytes).toString("base64")}`;
+
+    let cloudinaryUrl: string;
+
+    try {
+      const uploadResult = await cloudinary.uploader.upload(base64Pdf, {
+        public_id: `comicore/pdfs/${fileName}`,
+        resource_type: "raw",
+        type: "upload",
+        access_mode: "public",
+      });
+      cloudinaryUrl = uploadResult.secure_url;
+    } catch (cloudError: any) {
+      console.error("Cloudinary upload failed:", cloudError);
+      // Fallback: return PDF directly if Cloudinary fails
+      return new NextResponse(pdfBytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${title}.pdf"`,
+          "Content-Length": pdfBytes.length.toString(),
+        },
+      });
+    }
+
+    // Return the Cloudinary URL
+    return NextResponse.json({
+      success: true,
+      data: {
+        url: cloudinaryUrl,
+        fileName: `${title}.pdf`,
+        size: pdfBytes.length,
+        pages: approvedPages.length,
       },
     });
   } catch (error: any) {
