@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Export from "@/lib/models/Export";
+import Book from "@/lib/models/Book";
 import { getSession } from "@/lib/auth";
 
 /**
@@ -8,6 +9,7 @@ import { getSession } from "@/lib/auth";
  *
  * Lists exports for the CURRENT USER only (without the binary data)
  * Supports pagination with page and pageSize query params
+ * Matches exports by userId OR by bookId that belongs to the user
  */
 export async function GET(request: NextRequest) {
   try {
@@ -27,13 +29,26 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
     const pageSize = parseInt(searchParams.get("pageSize") || "10");
-    const bookId = searchParams.get("bookId");
+    const bookIdParam = searchParams.get("bookId");
     const userId = session.userId;
 
-    // Build query - ALWAYS filter by user ID
-    const query: any = { userId };
-    if (bookId) {
-      query.bookId = bookId;
+    // Get all book IDs that belong to this user
+    const userBooks = await Book.find({ userId }).select("_id").lean();
+    const userBookIds = userBooks.map((b) => b._id);
+
+    // Build query - match by userId OR by bookId that belongs to user
+    let query: any;
+    if (bookIdParam) {
+      // If specific bookId is requested, check if it belongs to user
+      query = { bookId: bookIdParam };
+    } else {
+      // Get exports that either have this userId OR have a bookId from user's books
+      query = {
+        $or: [
+          { userId },
+          { bookId: { $in: userBookIds } }
+        ]
+      };
     }
 
     // Calculate skip for pagination
@@ -61,7 +76,9 @@ export async function GET(request: NextRequest) {
       pageCount: exp.pageCount,
       originalSize: formatBytes(exp.originalSize),
       compressedSize: formatBytes(exp.compressedSize),
-      compressionRatio: `${Math.round((1 - exp.compressedSize / exp.originalSize) * 100)}%`,
+      compressionRatio: exp.originalSize > 0 
+        ? `${Math.round((1 - exp.compressedSize / exp.originalSize) * 100)}%` 
+        : "0%",
       options: exp.options,
       createdAt: exp.createdAt.toISOString(),
       downloadUrl: `/api/export/pdf/${exp._id}`,

@@ -1,9 +1,46 @@
 "use client";
 
-import { ArrowRight, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Play, Sparkles, BookOpen, FileText, Users } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+
+interface Stats {
+  totalComics: number;
+  totalPages: number;
+  totalCharacters: number;
+  totalExports: number;
+  totalUsers: number;
+  totalExportSize: string;
+}
 
 export function HeroSection() {
+  const [stats, setStats] = useState<Stats>({
+    totalComics: 0,
+    totalPages: 0,
+    totalCharacters: 0,
+    totalExports: 0,
+    totalUsers: 0,
+    totalExportSize: "0 KB",
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        const res = await fetch("/api/stats");
+        const data = await res.json();
+        if (data.success) {
+          setStats(data.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch stats:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchStats();
+  }, []);
+
   return (
     <section className="relative min-h-screen flex items-center pt-20 overflow-hidden">
       {/* Background elements */}
@@ -44,17 +81,34 @@ export function HeroSection() {
           </p>
 
           {/* Stats */}
-          <div className="flex gap-10 py-4">
-            {[
-              { value: "Page by", label: "Generation" },
-              { value: "Memory", label: "Aware" },
-              { value: "Full", label: "Control" },
-            ].map((stat) => (
-              <div key={stat.label}>
-                <div className="text-2xl font-black text-[#E8B931]">{stat.value}</div>
-                <div className="text-xs text-[#666] tracking-widest uppercase mt-1">{stat.label}</div>
+          <div className="flex gap-8 py-4">
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <BookOpen className="w-4 h-4 text-[#E8B931]" />
+                <span className="text-2xl font-black text-[#E8B931]">
+                  {loading ? "..." : stats.totalComics.toLocaleString()}
+                </span>
               </div>
-            ))}
+              <div className="text-xs text-[#666] tracking-widest uppercase">Comics</div>
+            </div>
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <FileText className="w-4 h-4 text-[#E8B931]" />
+                <span className="text-2xl font-black text-[#E8B931]">
+                  {loading ? "..." : stats.totalPages.toLocaleString()}
+                </span>
+              </div>
+              <div className="text-xs text-[#666] tracking-widest uppercase">Pages</div>
+            </div>
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Users className="w-4 h-4 text-[#E8B931]" />
+                <span className="text-2xl font-black text-[#E8B931]">
+                  {loading ? "..." : stats.totalCharacters.toLocaleString()}
+                </span>
+              </div>
+              <div className="text-xs text-[#666] tracking-widest uppercase">Characters</div>
+            </div>
           </div>
 
           {/* CTAs */}
