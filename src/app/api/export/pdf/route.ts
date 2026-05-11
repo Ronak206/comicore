@@ -3,6 +3,7 @@ import { getProject } from "@/lib/db";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { connectDB } from "@/lib/mongodb";
 import Export from "@/lib/models/Export";
+import { getSession } from "@/lib/auth";
 
 /**
  * Sanitize text for WinAnsi encoding (pdf-lib standard fonts)
@@ -433,6 +434,16 @@ async function generatePdfBytes(
  */
 export async function POST(request: NextRequest) {
   try {
+    // Get current user session
+    const session = await getSession();
+    
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
     await connectDB();
     
     const body = await request.json();
@@ -494,9 +505,10 @@ export async function POST(request: NextRequest) {
 
     console.log(`[PDF Export] Compressed: ${compressedSize} bytes (${Math.round((1 - compressedSize / originalSize) * 100)}% reduction)`);
 
-    // Store in MongoDB
+    // Store in MongoDB with user ID
     const exportDoc = await Export.create({
       bookId: project.id,
+      userId: session.userId,
       title: options.title,
       format: "pdf",
       status: "completed",

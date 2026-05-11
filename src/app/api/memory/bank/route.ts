@@ -3,30 +3,45 @@ import { connectDB } from "@/lib/mongodb";
 import Book from "@/lib/models/Book";
 import Character from "@/lib/models/Character";
 import World from "@/lib/models/World";
+import { getSession } from "@/lib/auth";
 
 /**
  * GET /api/memory/bank
  *
- * Fetches all memory bank data from the database:
+ * Fetches memory bank data for the CURRENT USER only:
  * - Overview: Books overview with stats
- * - Characters: All characters from database
- * - Visual Style: Art styles from books
+ * - Characters: Characters from user's books
+ * - Visual Style: Art styles from user's books
  * - Panel Layouts: Page index and layout info
- * - World Info: World settings from database
+ * - World Info: World settings from user's books
  */
 export async function GET(request: NextRequest) {
   try {
+    // Get current user session
+    const session = await getSession();
+    
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
     await connectDB();
 
     const { searchParams } = new URL(request.url);
     const bookId = searchParams.get("bookId");
+    const userId = session.userId;
 
-    // Build query if bookId is provided
-    const bookQuery = bookId ? { _id: bookId } : {};
+    // Build query - ALWAYS filter by user ID
+    const bookQuery: any = { userId };
+    if (bookId) {
+      bookQuery._id = bookId;
+    }
 
-    // Fetch all books
+    // Fetch only user's books
     const books = await Book.find(bookQuery)
-      .select("title genre synopsis tone status style chapters pageIndex")
+      .select("title genre synopsis tone status style chapters pageIndex userId")
       .sort({ updatedAt: -1 })
       .lean();
 

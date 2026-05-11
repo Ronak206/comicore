@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Export from "@/lib/models/Export";
+import { getSession } from "@/lib/auth";
 
 /**
  * GET /api/exports
  *
- * Lists all exports with their details (without the binary data)
+ * Lists exports for the CURRENT USER only (without the binary data)
  * Supports pagination with page and pageSize query params
  */
 export async function GET(request: NextRequest) {
   try {
+    // Get current user session
+    const session = await getSession();
+    
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
     await connectDB();
 
     // Get query parameters
@@ -17,9 +28,10 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1");
     const pageSize = parseInt(searchParams.get("pageSize") || "10");
     const bookId = searchParams.get("bookId");
+    const userId = session.userId;
 
-    // Build query
-    const query: any = {};
+    // Build query - ALWAYS filter by user ID
+    const query: any = { userId };
     if (bookId) {
       query.bookId = bookId;
     }
