@@ -581,7 +581,7 @@ async function generatePdfBytes(
       descLines.slice(0, 4).forEach((line, lineIdx) => {
         if (lineIdx === 0) {
           // Add bullet point for first line
-          contentPage.drawText("●", {
+          contentPage.drawText(">", {
             x: margin + 5,
             y: yPos,
             size: 8,
@@ -605,7 +605,7 @@ async function generatePdfBytes(
         let tagX = margin + 5;
         
         if (panel.cameraAngle) {
-          const cameraText = sanitizeForPdf(`📷 ${panel.cameraAngle}`);
+          const cameraText = sanitizeForPdf(`[Cam] ${panel.cameraAngle}`);
           const cameraWidth = font.widthOfTextAtSize(cameraText, 8);
           drawRoundedBox(contentPage, tagX, yPos - 2, cameraWidth + 10, 16, 0, colors.lightPurple, colors.secondary, 1);
           contentPage.drawText(cameraText, {
@@ -619,7 +619,7 @@ async function generatePdfBytes(
         }
         
         if (panel.mood) {
-          const moodText = sanitizeForPdf(`🎭 ${panel.mood}`);
+          const moodText = sanitizeForPdf(`[Mood] ${panel.mood}`);
           const moodWidth = font.widthOfTextAtSize(moodText, 8);
           drawRoundedBox(contentPage, tagX, yPos - 2, moodWidth + 10, 16, 0, colors.lightBlue, colors.primary, 1);
           contentPage.drawText(moodText, {
