@@ -1,13 +1,13 @@
 /**
  * Comicore AI Worker Client
  *
- * Direct API calls to AI models for comic generation.
- * API: api.aisubscription.shop
- * Primary Model: google/gemini-2.5-flash
+ * Direct API calls to Google Gemini for comic generation.
+ * API: Google Generative AI (Gemini)
  *
  * Features:
- * - Automatic retry with exponential backoff for rate limits
- * - Multiple fallback models on failure
+ * - Direct Gemini API integration
+ * - Automatic retry with exponential backoff
+ * - Simple, lightweight implementation
  *
  * Endpoints:
  *   aiWrite()   — Story, dialogue, scripts
@@ -18,31 +18,18 @@
 
 // ─── Config ──────────────────────────────────────
 
-const API_URL = "https://api.aisubscription.shop/v1/chat/completions";
-const API_KEY = process.env.AI_API_KEY || "sk-onRjqG1aC1qN1lrpArhdn16QjqTExJW2hX-ZSqkMNgY";
+const API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const API_KEY = process.env.API_KEY || "";
 
-// Model configuration with fallbacks (in priority order)
-// Primary model for all AI operations
-const PRIMARY_MODEL = "google/gemini-2.5-flash";
-
-// Fallback models when primary is rate-limited or fails
-const FALLBACK_MODELS = [
-  "google/gemini-2.5-flash-lite",
-  "google/gemini-3.1-flash-lite-preview",
-  "google/gemini-2.5-pro",
-  "google/gemini-3.1-pro-preview",
-  "Qwen/Qwen3.6-27B",
-  "minimax-m2.5-thinking",
-  "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4",
-];
+// Model configuration
+const MODEL = "gemini-2.0-flash";
 
 // Retry configuration
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 2000; // 2 seconds
 
-console.log("[AI Worker] Initialized with AI Subscription API");
-console.log("[AI Worker] Primary Model:", PRIMARY_MODEL);
-console.log("[AI Worker] Fallback Models:", FALLBACK_MODELS.length, "models available");
+console.log("[AI Worker] Initialized with Google Gemini API");
+console.log("[AI Worker] Model:", MODEL);
 
 // ─── Types ───────────────────────────────────────
 
@@ -60,16 +47,14 @@ export interface AIRequest {
 
 export interface SingleModelResponse {
   task: string;
-  forced_model: string;
-  actual_model: string;
+  model: string;
   response: {
-    id: string;
-    choices: Array<{
-      message: { role: string; content: string };
-      finish_reason: string;
-    }>;
-    model: string;
-    usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+    text: string;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
   };
 }
 
@@ -77,13 +62,11 @@ export interface PipelineResponse {
   task: "generate";
   pipeline: "write → validate";
   write: {
-    forced_model: string;
-    actual_model: string;
+    model: string;
     content: string;
   };
   validate: {
-    forced_model: string;
-    actual_model: string;
+    model: string;
     validation: string;
   };
 }
@@ -94,98 +77,93 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ─── Internal API Call with Retry & Fallback ──────────────────────────────
+// ─── Build Gemini Request Body ──────────────────────────────────
 
-async function callAI(
-  model: string, 
-  messages: Message[], 
-  maxTokens: number = 4096,
-  retryCount: number = 0,
-  isFallback: boolean = false
-): Promise<any> {
-  const currentModel = isFallback ? model : PRIMARY_MODEL;
-  console.log(`[AI Worker] Calling model: ${currentModel}${retryCount > 0 ? ` (retry ${retryCount})` : ''}${isFallback ? ' [fallback]' : ''}`);
+function buildGeminiRequest(system: string, user: string, history?: Message[], maxTokens?: number): any {
+  // Build contents array from history
+  const contents: any[] = [];
+  
+  // Add system instruction as first user message (Gemini doesn't have system role)
+  // We'll prepend it to the actual user message
+  
+  // Add conversation history
+  if (history && history.length > 0) {
+    history.forEach(msg => {
+      contents.push({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }]
+      });
+    });
+  }
+  
+  // Combine system prompt with user message
+  const fullPrompt = system ? `${system}\n\n---\n\n${user}` : user;
+  
+  contents.push({
+    role: "user",
+    parts: [{ text: fullPrompt }]
+  });
+  
+  return {
+    contents,
+    generationConfig: {
+      maxOutputTokens: maxTokens || 8192,
+      temperature: 0.7,
+      topP: 0.95,
+    }
+  };
+}
+
+// ─── Internal API Call with Retry ──────────────────────────────
+
+async function callGemini(
+  system: string,
+  user: string,
+  history?: Message[],
+  maxTokens: number = 8192,
+  retryCount: number = 0
+): Promise<string> {
+  console.log(`[AI Worker] Calling Gemini${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
   
   if (!API_KEY) {
-    throw new Error("AI_API_KEY is not configured. Please add it to your .env.local file.");
+    throw new Error("API_KEY is not configured. Please add it to your .env file.");
   }
 
   try {
-    const res = await fetch(API_URL, {
+    const url = `${API_URL}/${MODEL}:generateContent?key=${API_KEY}`;
+    const body = buildGeminiRequest(system, user, history, maxTokens);
+    
+    const res = await fetch(url, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ 
-        model: currentModel, 
-        messages,
-        max_tokens: maxTokens,
-      }),
+      body: JSON.stringify(body),
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      const errorMessage = data.message || data.error?.message || data.error || "Request failed";
-      const errorCode = data.error?.code || res.status;
+      const errorMessage = data.error?.message || "Request failed";
       
-      // Handle rate limiting (429) or model not found (404) with retry/fallback
-      if (errorCode === 429 || res.status === 429 || errorCode === 404 || res.status === 404) {
-        console.warn(`[AI Worker] Error on model ${currentModel}: ${errorMessage}`);
-        
-        // Try with exponential backoff first (only for rate limits)
-        if ((errorCode === 429 || res.status === 429) && retryCount < MAX_RETRIES) {
-          const backoffDelay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
-          console.log(`[AI Worker] Retrying in ${backoffDelay}ms...`);
-          await delay(backoffDelay);
-          return callAI(model, messages, maxTokens, retryCount + 1, isFallback);
-        }
-        
-        // If retries exhausted or model not found, try fallback models
-        if (!isFallback) {
-          console.log("[AI Worker] Primary model failed, trying fallback models...");
-          for (const fallbackModel of FALLBACK_MODELS) {
-            try {
-              console.log(`[AI Worker] Trying fallback model: ${fallbackModel}`);
-              const fallbackRes = await fetch(API_URL, {
-                method: "POST",
-                headers: {
-                  "Authorization": `Bearer ${API_KEY}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ 
-                  model: fallbackModel, 
-                  messages,
-                  max_tokens: maxTokens,
-                }),
-              });
-
-              if (fallbackRes.ok) {
-                const fallbackData = await fallbackRes.json();
-                console.log(`[AI Worker] Fallback model ${fallbackModel} succeeded`);
-                return fallbackData;
-              } else {
-                const errData = await fallbackRes.json();
-                console.warn(`[AI Worker] Fallback ${fallbackModel} failed:`, errData.message || errData.error?.message || fallbackRes.status);
-              }
-            } catch (fallbackError: any) {
-              console.warn(`[AI Worker] Fallback model ${fallbackModel} error:`, fallbackError.message);
-            }
-          }
-        }
-        
-        throw new Error(`All models failed. Please try again later.`);
+      // Handle rate limiting (429) with retry
+      if (res.status === 429 && retryCount < MAX_RETRIES) {
+        const backoffDelay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
+        console.log(`[AI Worker] Rate limited, retrying in ${backoffDelay}ms...`);
+        await delay(backoffDelay);
+        return callGemini(system, user, history, maxTokens, retryCount + 1);
       }
       
       console.error(`[AI Worker] API error (${res.status}):`, data);
-      throw new Error(`AI API error (${res.status}): ${errorMessage}`);
+      throw new Error(`Gemini API error: ${errorMessage}`);
     }
 
-    console.log(`[AI Worker] Response received from ${currentModel}`);
-    console.log(`[AI Worker] Tokens used - Prompt: ${data.usage?.prompt_tokens}, Completion: ${data.usage?.completion_tokens}`);
+    // Extract text from Gemini response
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     
-    return data;
+    console.log(`[AI Worker] Response received, length: ${text.length}`);
+    
+    return text;
   } catch (error: any) {
     // Network errors - retry
     if (error.cause?.code === 'ECONNRESET' || error.cause?.code === 'ETIMEDOUT') {
@@ -193,11 +171,11 @@ async function callAI(
         const backoffDelay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
         console.log(`[AI Worker] Network error, retrying in ${backoffDelay}ms...`);
         await delay(backoffDelay);
-        return callAI(model, messages, maxTokens, retryCount + 1, isFallback);
+        return callGemini(system, user, history, maxTokens, retryCount + 1);
       }
     }
     
-    console.error(`[AI Worker] Fetch failed for ${currentModel}:`, error.message);
+    console.error(`[AI Worker] Fetch failed:`, error.message);
     throw error;
   }
 }
@@ -205,65 +183,50 @@ async function callAI(
 // ─── Public API ──────────────────────────────────
 
 /**
- * Write endpoint — uses configured model for story writing
+ * Write endpoint — uses Gemini for story writing
  * Best for: story writing, dialogue, scripts, image prompts
  */
 export async function aiWrite(req: AIRequest): Promise<SingleModelResponse> {
-  const messages: Message[] = [
-    { role: "system", content: req.system },
-    ...(req.history || []),
-    { role: "user", content: req.user },
-  ];
-
-  const data = await callAI(PRIMARY_MODEL, messages, req.maxTokens || 4096);
+  const text = await callGemini(req.system, req.user, req.history, req.maxTokens || 4096);
 
   return {
     task: "write",
-    forced_model: PRIMARY_MODEL,
-    actual_model: data.model,
-    response: data,
+    model: MODEL,
+    response: {
+      text,
+    },
   };
 }
 
 /**
- * Think endpoint — uses configured model for deep thinking
+ * Think endpoint — uses Gemini for deep thinking
  * Best for: deep planning, revision analysis, story architecture
  */
 export async function aiThink(req: AIRequest): Promise<SingleModelResponse> {
-  const messages: Message[] = [
-    { role: "system", content: req.system },
-    ...(req.history || []),
-    { role: "user", content: req.user },
-  ];
-
-  const data = await callAI(PRIMARY_MODEL, messages, req.maxTokens || 8192);
+  const text = await callGemini(req.system, req.user, req.history, req.maxTokens || 8192);
 
   return {
     task: "think",
-    forced_model: PRIMARY_MODEL,
-    actual_model: data.model,
-    response: data,
+    model: MODEL,
+    response: {
+      text,
+    },
   };
 }
 
 /**
- * Memory endpoint — uses configured model for context-heavy tasks
+ * Memory endpoint — uses Gemini for context-heavy tasks
  * Best for: world-building, consistency checks, long context tasks
  */
 export async function aiMemory(req: AIRequest): Promise<SingleModelResponse> {
-  const messages: Message[] = [
-    { role: "system", content: req.system },
-    ...(req.history || []),
-    { role: "user", content: req.user },
-  ];
-
-  const data = await callAI(PRIMARY_MODEL, messages, req.maxTokens || 8192);
+  const text = await callGemini(req.system, req.user, req.history, req.maxTokens || 8192);
 
   return {
     task: "memory",
-    forced_model: PRIMARY_MODEL,
-    actual_model: data.model,
-    response: data,
+    model: MODEL,
+    response: {
+      text,
+    },
   };
 }
 
@@ -276,43 +239,25 @@ export async function aiGenerate(req: AIRequest): Promise<PipelineResponse> {
   console.log("[AI Worker] Starting pipeline: Write → Validate");
   
   // Step 1 — Generate content
-  const writeMessages: Message[] = [
-    { role: "system", content: req.system },
-    ...(req.history || []),
-    { role: "user", content: req.user },
-  ];
-
-  const writeData = await callAI(PRIMARY_MODEL, writeMessages, req.maxTokens || 4096);
-  const writeOutput = writeData.choices?.[0]?.message?.content || "";
+  const writeOutput = await callGemini(req.system, req.user, req.history, req.maxTokens || 4096);
   console.log("[AI Worker] Write output length:", writeOutput.length);
 
   // Step 2 — Validate
-  const validateMessages: Message[] = [
-    {
-      role: "system",
-      content: "You are a continuity validator. Review the generated content for: 1) Character consistency 2) Plot holes 3) Visual continuity 4) Timeline accuracy. Reply with APPROVED if clean, or list specific issues."
-    },
-    {
-      role: "user",
-      content: `Context:\n${(req.history || []).map(m => `${m.role}: ${m.content}`).join("\n")}\n\nGenerated content:\n${writeOutput}\n\nValidate this content.`
-    }
-  ];
-
-  const validateData = await callAI(PRIMARY_MODEL, validateMessages, 2048);
-  const validateOutput = validateData.choices?.[0]?.message?.content || "";
+  const validateSystem = "You are a continuity validator. Review the generated content for: 1) Character consistency 2) Plot holes 3) Visual continuity 4) Timeline accuracy. Reply with APPROVED if clean, or list specific issues.";
+  const validateUser = `Context:\n${(req.history || []).map(m => `${m.role}: ${m.content}`).join("\n")}\n\nGenerated content:\n${writeOutput}\n\nValidate this content.`;
+  
+  const validateOutput = await callGemini(validateSystem, validateUser, [], 2048);
   console.log("[AI Worker] Validation output length:", validateOutput.length);
 
   return {
     task: "generate",
     pipeline: "write → validate",
     write: {
-      forced_model: PRIMARY_MODEL,
-      actual_model: writeData.model,
+      model: MODEL,
       content: writeOutput,
     },
     validate: {
-      forced_model: PRIMARY_MODEL,
-      actual_model: validateData.model,
+      model: MODEL,
       validation: validateOutput,
     },
   };
@@ -322,7 +267,7 @@ export async function aiGenerate(req: AIRequest): Promise<PipelineResponse> {
 
 /** Extract text content from a single model response */
 export function extractContent(res: SingleModelResponse): string {
-  return res.response?.choices?.[0]?.message?.content || "";
+  return res.response?.text || "";
 }
 
 /** Extract text from write output in pipeline response */
